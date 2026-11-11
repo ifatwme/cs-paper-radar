@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew the Let's Encrypt certificate for CS Paper Radar
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/cs-paper-radar
+ExecStart=/root/cs-paper-radar/scripts/renew_cert.sh
+TimeoutStartSec=10min

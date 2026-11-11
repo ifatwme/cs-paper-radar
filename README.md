@@ -71,6 +71,10 @@ The server override binds the site to **127.0.0.1 only** by default. Browse it t
 ssh -N -L 9000:127.0.0.1:<HTTPS_PORT> -p <ssh-port> user@<server>   # then open https://localhost:9000
 ```
 
+Certificates: `scripts/renew_cert.sh` obtains/renews a Let's Encrypt certificate for `CERT_IDENTIFIER`
+(IP or domain) using lego's own HTTP-01 server, so port 80 is opened only during a renewal;
+`cs-paper-radar-cert-renew.timer` runs it twice a day and reloads nginx.
+
 (The certificate is issued for the server's address, so the browser will warn on `localhost`; accept it
 for the tunnel, or set `HTTPS_BIND=0.0.0.0` only if you deliberately want the site public.)
 
