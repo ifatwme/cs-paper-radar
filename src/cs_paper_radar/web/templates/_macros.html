@@ -1,0 +1,39 @@
+{% macro score_bar(p) -%}
+{% if p.total is not none %}
+<span class="score" title="Frontier score {{ '%.2f'|format(p.total) }} — {% for s in signals %}{{ signal_labels[s] }} {{ '%.2f'|format(p[s] or 0) }}{{ ', ' if not loop.last }}{% endfor %}">
+  <b>{{ '%.2f'|format(p.total) }}</b>
+  <span class="bar">{% for s in signals %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * (p[s] or 0) * 100)|round(1) }}%"></i>{% endfor %}</span>
+</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro authors(list, n=6) -%}
+{{ list[:n]|join(', ') }}{% if list|length > n %} <span class="muted">+{{ list|length - n }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro paper_card(p, rank=none, extra=none, open=false) -%}
+<article class="paper">
+  <div class="head">
+    {% if rank %}<span class="rank">{{ rank }}</span>{% endif %}
+    <div class="main">
+      <h3><a href="/paper/{{ p.uid }}">{{ p.title }}</a></h3>
+      <div class="meta">
+        <a class="cat" href="/daily?date={{ p.pub_date }}&cat={{ p.primary_category }}" title="{{ category_name(p.primary_category) }}">{{ p.primary_category }}</a>
+        {% for c in p.categories if c != p.primary_category %}<span class="cat x" title="{{ category_name(c) }}">{{ c }}</span>{% endfor %}
+        <span class="muted">· {{ p.pub_date }} ·</span> <span class="authors">{{ authors(p.authors) }}</span>
+      </div>
+      {% if p.tags %}<div class="tags">{% for t in p.tags %}<span class="tag t-{{ t|replace(' ', '-')|replace('/', '-') }}">{{ t }}</span>{% endfor %}</div>{% endif %}
+      {% if extra %}<div class="extra">{{ extra }}</div>{% endif %}
+    </div>
+    <div class="side">
+      {{ score_bar(p) }}
+      <span class="links"><a href="{{ p.abs_url }}" target="_blank" rel="noopener">abs</a> <a href="{{ p.pdf_url }}" target="_blank" rel="noopener">pdf</a></span>
+    </div>
+  </div>
+  <details{{ ' open' if open }}><summary>Abstract{% if p.comment %} · <span class="muted">{{ p.comment[:120] }}</span>{% endif %}</summary><p>{{ p.abstract }}</p></details>
+</article>
+{%- endmacro %}
+
+{% macro legend() -%}
+<div class="legend">{% for s in signals %}<span><i class="sig-{{ s }}"></i>{{ signal_labels[s] }} {{ (weights[s] * 100)|round|int }}%</span>{% endfor %} <a href="/about">how scoring works</a></div>
+{%- endmacro %}

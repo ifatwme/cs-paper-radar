@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <meta name="description" content="Daily arXiv computer science & engineering papers, weekly top picks and topic frontiers.">
+  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+  <link rel="alternate" type="application/rss+xml" title="Weekly top papers" href="/feed/weekly.xml">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='none' stroke='%232563eb' stroke-width='3'/><circle cx='16' cy='16' r='7' fill='none' stroke='%232563eb' stroke-width='3'/><circle cx='16' cy='16' r='2' fill='%232563eb'/></svg>">
+</head>
+<body>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/"><span class="logo">◎</span> {{ site_name }}</a>
+    <nav>
+      <a href="/daily" class="{{ 'on' if request.url.path == '/daily' }}">Daily</a>
+      <a href="/weekly" class="{{ 'on' if request.url.path == '/weekly' }}">Weekly top</a>
+      <a href="/topic" class="{{ 'on' if request.url.path == '/topic' }}">Topics</a>
+      <a href="/categories" class="{{ 'on' if request.url.path == '/categories' }}">Categories</a>
+      <a href="/about" class="{{ 'on' if request.url.path == '/about' }}">Method</a>
+      <a href="/api/docs">API</a>
+    </nav>
+    <form class="search" action="/topic" method="get">
+      <input type="search" name="q" placeholder="Explore a topic, e.g. network security" value="{{ q|default('') }}" aria-label="Topic">
+    </form>
+  </div>
+</header>
+<main class="wrap">
+{% block content %}{% endblock %}
+</main>
+<footer class="wrap foot">
+  {% if stats %}
+  <span>{{ "{:,}".format(stats.papers) }} papers · {{ stats.first_date }} → {{ stats.latest_date }}</span>
+  {% if stats.last_run %}<span>last update {{ stats.last_run.finished[:16]|replace('T', ' ') }} UTC</span>{% endif %}
+  {% endif %}
+  <span>Metadata from the <a href="https://info.arxiv.org/help/api/index.html">arXiv API</a>. Thank you to arXiv for use of its open access interoperability.</span>
+  <span><a href="https://github.com/ifatwme/cs-paper-radar">source</a> · v{{ version }}</span>
+</footer>
+</body>
+</html>

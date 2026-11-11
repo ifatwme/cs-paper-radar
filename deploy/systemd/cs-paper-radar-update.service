@@ -1,0 +1,12 @@
+[Unit]
+Description=CS Paper Radar daily update (fetch arXiv, embed, score, weekly picks)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/cs-paper-radar
+ExecStart=/usr/bin/docker compose run --rm job update
+TimeoutStartSec=3h
+Nice=10

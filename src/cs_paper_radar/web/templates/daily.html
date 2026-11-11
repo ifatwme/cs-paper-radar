@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import paper_card, legend %}
+{% block title %}Daily · {{ day }} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="row between">
+  <h1>Papers of {{ day }} <span class="muted small">{{ papers|length }} papers{% if cat %} in {{ cat }}{% endif %}</span></h1>
+  <div class="pager"><a href="/daily?date={{ prev_day }}&cat={{ cat }}&sort={{ sort }}">← {{ prev_day }}</a> <a href="/daily?date={{ next_day }}&cat={{ cat }}&sort={{ sort }}">{{ next_day }} →</a></div>
+</div>
+<p class="muted small">Grouped by the date of first submission (UTC). arXiv announces a day's submissions the following evening, so the most recent day fills up over ~24 h.</p>
+<form class="filters" method="get" action="/daily">
+  <label>Date <select name="date" onchange="this.form.submit()">{% for d in dates %}<option {{ 'selected' if d == day }}>{{ d }}</option>{% endfor %}{% if day not in dates %}<option selected>{{ day }}</option>{% endif %}</select></label>
+  <label>Category <select name="cat" onchange="this.form.submit()"><option value="">all</option>{% for c, name in all_categories.items() %}<option value="{{ c }}" {{ 'selected' if c == cat }}>{{ c }} — {{ name }}</option>{% endfor %}</select></label>
+  <label>Order <select name="sort" onchange="this.form.submit()">{% for s, l in [('category','by category'),('score','by score'),('time','newest first')] %}<option value="{{ s }}" {{ 'selected' if s == sort }}>{{ l }}</option>{% endfor %}</select></label>
+  <noscript><button>Apply</button></noscript>
+</form>
+{% if not cat and counts %}
+<div class="chips small">{% for c, n in counts %}<a class="chip" href="#{{ c }}" title="{{ category_name(c) }}">{{ c }} <b>{{ n }}</b></a>{% endfor %}</div>
+{% endif %}
+{{ legend() }}
+{% if sort == 'category' %}
+  {% for c, items in groups.items() %}
+  <h2 id="{{ c }}" class="group">{{ c }} <span class="muted">{{ category_name(c) }} · {{ items|length }}</span></h2>
+  {% for p in items %}{{ paper_card(p) }}{% endfor %}
+  {% endfor %}
+{% else %}
+  {% for p in papers %}{{ paper_card(p, rank=loop.index if sort == 'score' else none) }}{% endfor %}
+{% endif %}
+{% if not papers %}<p class="muted">No papers for this day{% if cat %} in {{ cat }}{% endif %}. Weekends are quiet, and the newest day appears after arXiv's evening announcement.</p>{% endif %}
+{% endblock %}

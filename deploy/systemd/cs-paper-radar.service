@@ -1,0 +1,17 @@
+[Unit]
+Description=CS Paper Radar (FastAPI app + nginx HTTPS)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/root/cs-paper-radar
+# .env sets COMPOSE_FILE so the HTTPS override is included.
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_macros.html" import paper_card, legend %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>What computer science is working on, this week.</h1>
+    <p class="lead">Every new arXiv paper in computer science and computer engineering, listed daily, ranked weekly with a transparent score, and explorable by topic.</p>
+    <div class="kpis">
+      <a href="/daily?date={{ latest }}"><b>{{ "{:,}".format(today_count) }}</b><span>papers on {{ latest }}</span></a>
+      <a href="/weekly?week={{ week }}"><b>{{ "{:,}".format(week_total) }}</b><span>papers in {{ week }}</span></a>
+      <a href="/categories"><b>{{ "{:,}".format(stats.papers) }}</b><span>papers indexed</span></a>
+    </div>
+  </div>
+  <div class="spark card">
+    <div class="muted small">Papers per day, last 4 weeks</div>
+    <svg viewBox="0 0 220 40" preserveAspectRatio="none"><polyline points="{{ daily|map(attribute='n')|list|sparkline }}"/></svg>
+    <div class="row small muted"><span>{{ daily[0].pub_date if daily }}</span><span>{{ latest }}</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>Explore a topic</h2>
+  <div class="chips">{% for t in presets %}<a class="chip" href="/topic?q={{ quote(t) }}">{{ t }}</a>{% endfor %}</div>
+</section>
+
+<section>
+  <div class="row between">
+    <h2>Top {{ top|length }} of {{ week }} <span class="muted small">({{ week|week_label }}{{ ', in progress: %d day%s so far'|format(week_days, '' if week_days == 1 else 's') if week_days < 7 }})</span></h2>
+    <span class="small"><a href="/weekly?week={{ prev_week }}">previous week →</a></span>
+  </div>
+  {{ legend() }}
+  {% for p in top %}{{ paper_card(p, rank=loop.index) }}{% else %}<p class="muted">No scored papers yet — the first pipeline run is still in progress.</p>{% endfor %}
+  <p><a class="btn" href="/weekly?week={{ week }}">Full weekly ranking</a></p>
+</section>
+
+<section>
+  <h2>Busiest categories this week</h2>
+  <div class="bars">
+  {% set mx = (top_cats[0][1] if top_cats else 1) %}
+  {% for c, n in top_cats %}
+    <a class="hbar" href="/weekly?week={{ week }}&cat={{ c }}"><span class="lbl">{{ c }} <span class="muted">{{ category_name(c) }}</span></span><span class="fill" style="width:{{ (n / mx * 100)|round }}%"></span><span class="num">{{ n }}</span></a>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

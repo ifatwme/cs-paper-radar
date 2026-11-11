@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import paper_card, score_bar %}
+{% block title %}{{ p.title }} · {{ site_name }}{% endblock %}
+{% block content %}
+<article class="detail">
+  <h1>{{ p.title }}</h1>
+  <p class="meta">{{ p.authors|join(', ') }}</p>
+  <p class="meta">
+    <a class="cat" href="/daily?date={{ p.pub_date }}&cat={{ p.primary_category }}">{{ p.primary_category }}</a> {{ category_name(p.primary_category) }}
+    {% for c in p.categories if c != p.primary_category %}<span class="cat x" title="{{ category_name(c) }}">{{ c }}</span>{% endfor %}
+    · submitted {{ p.published[:16]|replace('T', ' ') }} UTC · v{{ p.version }} · {{ p.uid }}
+  </p>
+  {% if p.tags %}<div class="tags">{% for t in p.tags %}<span class="tag t-{{ t|replace(' ', '-')|replace('/', '-') }}">{{ t }}</span>{% endfor %}</div>{% endif %}
+  <p class="links"><a class="btn" href="{{ p.abs_url }}" target="_blank" rel="noopener">arXiv page</a> <a class="btn" href="{{ p.pdf_url }}" target="_blank" rel="noopener">PDF</a> <a class="btn ghost" href="/weekly?week={{ p.week }}">week {{ p.week }}</a></p>
+  {% if p.comment %}<p class="muted">Comment: {{ p.comment }}</p>{% endif %}
+  {% if p.journal_ref %}<p class="muted">Journal ref: {{ p.journal_ref }}</p>{% endif %}
+  <h2>Abstract</h2>
+  <p class="abstract">{{ p.abstract }}</p>
+
+  {% if p.total is not none %}
+  <h2>Why it ranks where it does</h2>
+  <table class="breakdown">
+    <thead><tr><th>Signal</th><th>Value</th><th>Weight</th><th>Contribution</th><th>Evidence</th></tr></thead>
+    <tbody>
+    {% for s in signals %}
+      <tr><td><i class="dot sig-{{ s }}"></i>{{ signal_labels[s] }}</td><td>{{ '%.2f'|format(p[s] or 0) }}</td><td>{{ (weights[s] * 100)|round|int }}%</td><td>{{ '%.3f'|format(weights[s] * (p[s] or 0)) }}</td><td class="muted">{{ (p.details or {}).get(s, '') }}</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><td>Total</td><td colspan="2"></td><td><b>{{ '%.3f'|format(p.total) }}</b></td><td>{{ score_bar(p) }}</td></tr></tfoot>
+  </table>
+  {% endif %}
+</article>
+{% if similar %}
+<section>
+  <h2>Closest papers</h2>
+  {% for s in similar %}{{ paper_card(s, extra='similarity ' ~ ('%.2f'|format(s.similarity))) }}{% endfor %}
+</section>
+{% endif %}
+{% endblock %}

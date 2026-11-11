@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Local runtime data (anchored to the repo root)
+/data/
+.env
+.devrun.sh
+
+# Secrets / TLS material
+*.pem
+*.key
+/deploy/tls/
+/deploy/certs/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

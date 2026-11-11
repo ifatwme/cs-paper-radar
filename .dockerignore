@@ -1,0 +1,8 @@
+# Allow-list: the build context only needs these.
+*
+!pyproject.toml
+!requirements.txt
+!README.md
+!LICENSE
+!src/
+**/__pycache__

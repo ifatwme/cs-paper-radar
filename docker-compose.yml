@@ -1,0 +1,70 @@
+# CS Paper Radar — web app + pipeline jobs.
+#
+#   docker compose up -d --build                      # web app -> http://127.0.0.1:8000
+#   docker compose run --rm job backfill --days 90    # first load (history for novelty/momentum)
+#   docker compose run --rm job update                # what the daily timer runs
+#
+# Data (SQLite DB + embedding model cache) lives in ${DATA_PATH:-./data}.
+# The server override (deploy/compose.server.yml) adds an HTTPS reverse proxy.
+
+name: cs-paper-radar
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+x-env: &env
+  DATA_DIR: /data
+  SOURCES: ${SOURCES:-arxiv}
+  ARXIV_CATEGORIES: ${ARXIV_CATEGORIES:-cs.*,eess.SY,eess.SP,eess.AS,eess.IV}
+  EMBEDDINGS: ${EMBEDDINGS:-fastembed}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+  TOP_N: ${TOP_N:-20}
+  TOP_MAX_PER_CATEGORY: ${TOP_MAX_PER_CATEGORY:-4}
+  SCORE_WEIGHTS: ${SCORE_WEIGHTS:-}
+  UPDATE_LOOKBACK_DAYS: ${UPDATE_LOOKBACK_DAYS:-4}
+  SITE_NAME: ${SITE_NAME:-CS Paper Radar}
+
+services:
+  app:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    image: cs-paper-radar:latest
+    restart: unless-stopped
+    user: "${RADAR_UID:-10001}:${RADAR_GID:-10001}"
+    tmpfs: ["/tmp:size=64m"]
+    environment:
+      <<: *env
+      EMBEDDING_THREADS: ${APP_EMBEDDING_THREADS:-1}
+    volumes:
+      - ${DATA_PATH:-./data}:/data
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8000}:8000"
+    mem_limit: 1g
+    cpus: 1.5
+    pids_limit: 128
+
+  # One-shot pipeline jobs:  docker compose run --rm job <update|backfill|rescore|stats|top|topic>
+  job:
+    <<: *hardening
+    image: cs-paper-radar:latest
+    profiles: [jobs]
+    restart: "no"
+    user: "${RADAR_UID:-10001}:${RADAR_GID:-10001}"
+    tmpfs: ["/tmp:size=256m"]
+    command: ["update"]
+    healthcheck: {disable: true}   # the image healthcheck probes the web server
+    environment:
+      <<: *env
+      EMBEDDING_THREADS: ${JOB_EMBEDDING_THREADS:-4}
+    volumes:
+      - ${DATA_PATH:-./data}:/data
+    mem_limit: 2g
+    cpus: 3
+    pids_limit: 128

@@ -1,0 +1,140 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/13rS+svI5ndIZ4t6oBnlx3OIcDE</id>
+  <title>arXiv Query: search_query=cat:cs.CR AND submittedDate:"202611020000 TO 202611022359"&amp;id_list=&amp;start=0&amp;max_results=6</title>
+  <updated>2026-11-11T11:43:53Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:cs.CR+AND+submittedDate:%22202611020000+TO+202611022359%22&amp;start=0&amp;max_results=6&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>6</opensearch:itemsPerPage>
+  <opensearch:totalResults>41</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2611.02310v1</id>
+    <title>Detect, Repair and Audit: A Hierarchical Multi-Agent Defense Against Adversarial Attacks in Energy Forecasting</title>
+    <updated>2026-11-02T00:00:16Z</updated>
+    <link href="https://arxiv.org/abs/2611.02310v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.02310v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Accurate electricity-demand forecasting is essential for the modern energy infrastructure. Recently, Times-Series Large Language Models (TS-LLMs) have emerged as a promising approach to forecasting more accurate demand from historical consumption data in zero- and few-shot settings, helping energy operators effectively plan supply and allocate energy resources. However, these models are vulnerable to compromised sensor inputs that can distort forecasts and lead to erroneous market orders or unnecessary load shedding. Existing defenses focus primarily on end-device forecasting, overlooking the distinct data-drift, latency, and audit requirements across energy infrastructure. To address this gap, we extract from major energy standards and regulatory frameworks a three-layer conceptual model that captures the security postures for each layer. Guided by this model, we develop a Multi-Agent Reinforcement Learning (MARL) detector coupled with signal repair at local control centers, designed to mitigate distributional data drift through complementary feature-based detection and clean-reference-calibrated repair while meeting latency budgets. We further deploy an evidence-grounded LLM auditing agent with human-in-the-loop validation for audit-critical Virtual Power Plants (VPPs). In our evaluation, the best MARL configuration achieves an F1 score above 0.91 across all dataset-attack pairs, while signal repair reduces adversarial-to-clean input Relative Squared Error (RSE) by up to 83%. The few-shot auditor detects 77.78% of attacks in the Sherlock dataset. On the evaluated hardware, detection and repair require 7.95 ms on average, with a worst-observed latency of 14.50 ms, remaining within the local-center latency budget informed by IEEE 1646.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-02T00:00:16Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Zewei Shi</name>
+    </author>
+    <author>
+      <name>Ruoxi Sun</name>
+    </author>
+    <author>
+      <name>Minhui Xue</name>
+    </author>
+    <author>
+      <name>Feng Liu</name>
+    </author>
+    <author>
+      <name>Hua Ma</name>
+    </author>
+    <author>
+      <name>Xingliang Yuan</name>
+    </author>
+    <author>
+      <name>Surya Nepal</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2611.02319v1</id>
+    <title>Accessed, never disclosed: Silent access to protected health information by medical artificial intelligence agents</title>
+    <updated>2026-11-02T00:10:47Z</updated>
+    <link href="https://arxiv.org/abs/2611.02319v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.02319v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Medical artificial intelligence agents should retrieve patient identifiers only when a task requires them, the data-minimization principle behind the HIPAA minimum necessary standard for protected health information (PHI). An agent can retrieve identifiers without revealing them. Such silent access remains invisible to evaluations that inspect only the output. We embedded canaries in synthetic patient records and linked each tool invocation to canary exposure in the final answers across five language models, four boundary levels, and seven attack frames for identifier-free clinical tasks. Three models invoked the PHI tools unnecessarily, whereas Claude Opus 4.8 and GPT-5.5 did not. Stronger boundaries reduced this access, and the residual access under the strictest policy was confined to frames in which the user overrode the policy or asserted approval. A pre-execution gate given the task-necessity criterion nearly eliminated this access. Output-only evaluation cannot verify minimum-necessary access; boundaries, gates, and access-log audits are required together.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CY" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-02T00:10:47Z</published>
+    <arxiv:comment>33 pages, 5 figures, 1 table, 3 Extended Data tables; includes Supplementary Information (12 tables, 6 figures)</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Jae Wang Lee</name>
+    </author>
+    <author>
+      <name>Abhirup Banerjee</name>
+    </author>
+    <author>
+      <name>Yeong Chan Lee</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2611.02376v1</id>
+    <title>High-Throughput Private Information Retrieval with on-CPU Accelerators</title>
+    <updated>2026-11-02T01:43:11Z</updated>
+    <link href="https://arxiv.org/abs/2611.02376v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.02376v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Private information retrieval (PIR) hides which record a client retrieves by scanning the entire database, and batching is an effective technique to improve throughput by sharing this scan across queries. However, existing CPU-based solutions gain little from batching because each query still requires its own multiplications, and vector instructions perform only a few at a time. GPUs and other discrete accelerators can accelerate these computations, but require extra hardware and can constrain database size due to their limited memory capacity. In this paper, we present AltoPIR, the first PIR system that leverages on-CPU matrix accelerators such as Intel AMX. AltoPIR keeps the accelerator fed from the CPU caches, reading each database byte from memory once for all queries in a batch and never writing intermediate products to memory. This enables high-performance PIR through efficient batching without requiring discrete accelerators. Our evaluation shows that AltoPIR achieves up to 50.1x higher throughput than existing CPU-based solutions and serves databases larger than a GPU's memory.</summary>
+    <category term="cs.OS" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.DB" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-02T01:43:11Z</published>
+    <arxiv:primary_category term="cs.OS"/>
+    <author>
+      <name>Gyuyeong Kim</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2611.02380v1</id>
+    <title>Malware Clustering in the Wild: Taxonomy, Challenges, and Evaluation Metrics</title>
+    <updated>2026-11-02T01:47:18Z</updated>
+    <link href="https://arxiv.org/abs/2611.02380v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.02380v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>As malware continues to grow in volume, diversity, and sophistication, clustering has emerged as a critical technique for analyzing large malware corpora. Clustering enables the discovery of structural relationships, behavioral patterns, and evolutionary trends, and is widely used to group unknown samples, infer malware family boundaries, and identify novel variants. However, existing research remains fragmented, employing a wide range of clustering techniques with no unified perspective that systematically organizes prior work or clearly identifies gaps in the literature. This survey addresses this gap by organizing previous malware clustering research into seven categories: centroid-based, hierarchical-based, density-based, distribution-based, mixed- type, fuzzy, and AI-driven approaches. In addition, this survey summarizes publicly available malware datasets commonly used in clustering research and examines the feature representations derived from these datasets. Our goal is to clarify the current landscape and outline promising avenues for future research on malware clustering, including how AI-driven methods may shape large-scale and reproducible analysis.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-02T01:47:18Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Raguvir S</name>
+    </author>
+    <author>
+      <name>Bojing Li</name>
+    </author>
+    <author>
+      <name>Prajna Bhandary</name>
+    </author>
+    <author>
+      <name>Charles Nicholas</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2611.03742v1</id>
+    <title>Fixed Detectors, Moving Code: How Well Do Static Security Analyzers Hold Up over a Decade of C/C++ Evolution?</title>
+    <updated>2026-11-02T02:16:44Z</updated>
+    <link href="https://arxiv.org/abs/2611.03742v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.03742v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Static application security testing (SAST) tools are often deployed on the assumption that detectors configured today will remain effective on future code, including previously unknown vulnerabilities. We test this assumption using 20,000 vulnerable and fixed C/C++ cases from 1,116 open-source projects (2016-2025), evaluated with three CodeQL releases, three Infer releases, and one Semgrep configuration. To distinguish temporal effects from shifts in code composition, we compare yearly populations, project- and label-matched year pairs, and within-project trajectories. We investigate the largest within-project declines through repair diffs, detection predicates, alert locations, and execution logs, while accounting for failed, degraded, and costly analyses. Under changed-file case-label scoring, overall F1 ranges from 0.066 to 0.478, but count-based AUROC stays near chance (0.495-0.526). Newer CodeQL releases attain higher F1 alongside nearly parallel rises in recall and false-positive rate, not stronger separation of vulnerable from fixed cases. In project-matched year pairs, CodeQL R2024 has negative mean later-minus-earlier F1 at every source-year gap, whereas Infer v1.1 and v1.3 have positive means throughout. Among selected drops, only 6 of 39 CodeQL and 2 of 620 Infer findings overlap a changed repair line. For Semgrep, 78.96% of cases show parser or timeout diagnostics even though every run reports success. These results suggest that apparent changes in temporal SAST effectiveness can arise from broader alerting, changing analysis coverage, and incidental findings, not solely from losses in vulnerability detection. Evaluations of temporal sustainability should fix detector conditions, control for projects, inspect repair-level evidence, and report failed or degraded analyses.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-02T02:16:44Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Junhua Tang</name>
+    </author>
+    <author>
+      <name>Zhengsong Zhang. Haipeng Cai</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2611.02407v1</id>
+    <title>Networked Synthetic Social Engineering on the Web</title>
+    <updated>2026-11-02T02:28:55Z</updated>
+    <link href="https://arxiv.org/abs/2611.02407v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.02407v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Several genuine AI services may repeat one unsupported source, and correcting that source may leave later reports unchanged. We examine these networked consequences of synthetic social engineering (SSE), deliberately misleading influence intended to redirect AI recipients from authorized objectives. Our framework connects social influence, information aggregation, and misinformation correction research to observable evidence and permission boundaries. It separates originating attempts from legitimate intermediaries' work and distinguishes identity, evidentiary support, and authorization. We test four relationships using Qwen3-4B and two briefing tasks across 1,080 research units in our Agent Service Exchange and Evidence Commons (ASE-EC). Multiple dependent publishers produced no supported increase in unsupported verification (78.3% versus 75.0%); publication availability left downstream violation reach at 40.0% in both arms. These comparisons direct attention to weaknesses already present in the reference workflows. High reference error rates and retained private handoffs preclude claims of immunity to social pressure. Without scope revalidation, corrections identifying dependent reports reduced residual invalid decisions from 14.4% to 8.1% at equal notification coverage and increased successful report repairs from 16/63 to 36/63. Scope revalidation added no demonstrated protection, and clearing dialogue offered no established recovery advantage. Unapproved requests persisted, all blocked by an external gateway. For designers, the findings caution against treating publisher count as independent evidence, notification as repair, or cleared histories as recovery. They support targeting corrections at reused reports, assessing factual and permission recovery separately, and enforcing authorization at execution.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CY" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-02T02:28:55Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Bryan C. Boots</name>
+    </author>
+  </entry>
+</feed>

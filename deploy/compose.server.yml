@@ -1,0 +1,39 @@
+# Production override for the VPS: HTTPS reverse proxy on ${HTTPS_PORT}.
+#   COMPOSE_FILE=docker-compose.yml:deploy/compose.server.yml   (set in .env)
+# Ports 80/443 on this host belong to another project, so we publish a spare port
+# and reuse the host's Let's Encrypt certificate (TLS_DIR must contain
+# fullchain.pem and privkey.pem readable by uid 101, the nginx-unprivileged user).
+services:
+  app:
+    ports: !reset []          # only nginx is reachable from outside
+
+  web:
+    image: nginxinc/nginx-unprivileged:1.31.7-alpine
+    restart: unless-stopped
+    init: true                # reap healthcheck/reload child processes
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    # Certificates are short-lived and renewed on disk by the host; reload every
+    # 6 h so nginx always serves the current one without a restart.
+    command: ["/bin/sh", "-c", "(while sleep 21600; do nginx -s reload; done) & exec nginx -g 'daemon off;'"]
+    ports:
+      - "${HTTPS_PORT:?set HTTPS_PORT in .env}:8443"
+    volumes:
+      - ./docker/nginx/https.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/security-headers.inc:/etc/nginx/snippets/security-headers.inc:ro
+      - ${TLS_DIR:?set TLS_DIR in .env}:/etc/nginx/tls:ro
+    depends_on:
+      app: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "/dev/null", "https://127.0.0.1:8443/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    mem_limit: 64m
+    cpus: 0.5
+    pids_limit: 64

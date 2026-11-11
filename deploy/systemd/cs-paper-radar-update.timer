@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the CS Paper Radar update after arXiv's daily announcements
+
+[Timer]
+# arXiv announces new papers at 20:00 US Eastern (00:00/01:00 UTC), Sunday-Thursday.
+# The second run picks up late announcements and replacements.
+OnCalendar=*-*-* 02:30:00 UTC
+OnCalendar=*-*-* 14:30:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
