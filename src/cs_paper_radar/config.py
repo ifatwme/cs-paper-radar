@@ -91,6 +91,10 @@ class Settings:
 
     # Ranking
     top_n: int = field(default_factory=lambda: _env_int("TOP_N", 20))
+    # "proportional": each research area gets weekly slots in proportion to its share
+    # of the week's papers (at least one), filled by score. "cap": global ranking with
+    # at most TOP_MAX_PER_CATEGORY papers per category.
+    top_selection: str = field(default_factory=lambda: _env("TOP_SELECTION", "proportional"))
     top_max_per_category: int = field(
         default_factory=lambda: _env_int("TOP_MAX_PER_CATEGORY", 4)
     )

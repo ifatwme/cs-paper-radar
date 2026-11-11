@@ -465,16 +465,11 @@ def score_week(settings: Settings, db: Database, model: str | None, week: str) -
             "breadth": m["breadth"], "team": m["team"], "tags": tags, "details": details,
         })
     db.save_scores(rows)
-    primary = {p["uid"]: p["primary_category"] for p in papers}
-    eligible = [r for r in rows
-                if not settings.top_cs_primary_only or primary[r["uid"]] in CATEGORY_NAMES]
-    picks = select_top(
-        sorted(eligible, key=lambda r: r["total"], reverse=True),
-        {p["uid"]: home_category(p["primary_category"], p["categories"]) for p in papers},
-        n=max(settings.top_n, 50),
-        max_per_category=settings.top_max_per_category,
-        vectors=_vectors_for(db, model, week) if model else None,
-    )
+    eligible = [p for p in papers
+                if not settings.top_cs_primary_only or p["primary_category"] in CATEGORY_NAMES]
+    picks = select_weekly(settings, eligible, {r["uid"]: r["total"] for r in rows},
+                          max(settings.top_n, 50),
+                          _vectors_for(db, model, week) if model else None)
     db.save_weekly_picks(week, [(r["uid"], r["total"]) for r in picks])
     return len(rows)
 
@@ -485,6 +480,23 @@ def _vectors_for(db: Database, model: str, week: str) -> dict[str, np.ndarray]:
     return dict(zip(uids, vecs))
 
 
+def area_quotas(sizes: dict[str, int], n: int, min_size: int = 20) -> dict[str, int]:
+    """Split n slots across areas in proportion to their number of papers
+    (largest-remainder method), at least one slot per area with >= min_size papers."""
+    eligible = {a: c for a, c in sizes.items() if c >= min_size} or dict(sizes)
+    total = sum(eligible.values()) or 1
+    raw = {a: n * c / total for a, c in eligible.items()}
+    q = {a: max(1, math.floor(r)) for a, r in raw.items()}
+    while sum(q.values()) < n:
+        a = max(raw, key=lambda k: raw[k] - q[k])
+        q[a] += 1
+    while sum(q.values()) > n:
+        candidates = [a for a in q if q[a] > 1] or list(q)
+        a = min(candidates, key=lambda k: raw[k] - q[k])
+        q[a] -= 1
+    return q
+
+
 def select_top(
     ranked: list[dict],
     primary_of: dict[str, str],
@@ -492,26 +504,72 @@ def select_top(
     max_per_category: int,
     vectors: dict[str, np.ndarray] | None = None,
     duplicate_sim: float = 0.93,
+    group_of: dict[str, str] | None = None,
+    quotas: dict[str, int] | None = None,
 ) -> list[dict]:
-    """Greedy top-N with diversity: at most `max_per_category` papers per primary
-    category and no near-duplicates (cosine > duplicate_sim)."""
+    """Greedy top-N by score with diversity rules:
+    * quotas: at most quotas[group] papers per group (e.g. research area); slots an
+      area cannot fill are released to the best remaining papers;
+    * max_per_category: at most this many per category (0 = no cap);
+    * no near-duplicates (cosine > duplicate_sim)."""
     picked: list[dict] = []
     per_cat: dict[str, int] = {}
+    per_group: dict[str, int] = {}
     picked_vecs: list[np.ndarray] = []
-    for r in ranked:
+    picked_ids: set[str] = set()
+
+    def try_pick(r: dict, enforce_quota: bool) -> bool:
         cat = primary_of.get(r["uid"], "")
         if max_per_category and per_cat.get(cat, 0) >= max_per_category:
-            continue
+            return False
+        grp = group_of.get(r["uid"], "") if group_of else ""
+        if enforce_quota and quotas is not None and per_group.get(grp, 0) >= quotas.get(grp, 0):
+            return False
         v = vectors.get(r["uid"]) if vectors else None
         if v is not None and picked_vecs and float(np.max(np.vstack(picked_vecs) @ v)) > duplicate_sim:
-            continue
+            return False
         picked.append(r)
+        picked_ids.add(r["uid"])
         per_cat[cat] = per_cat.get(cat, 0) + 1
+        per_group[grp] = per_group.get(grp, 0) + 1
         if v is not None:
             picked_vecs.append(v)
+        return True
+
+    for r in ranked:
         if len(picked) >= n:
             break
+        try_pick(r, enforce_quota=True)
+    if quotas is not None and len(picked) < n:  # unfilled quotas -> best remaining
+        for r in ranked:
+            if len(picked) >= n:
+                break
+            if r["uid"] not in picked_ids:
+                try_pick(r, enforce_quota=False)
+    picked.sort(key=lambda r: r.get("total") or 0, reverse=True)
     return picked
+
+
+def area_slug(p: dict) -> str:
+    return SLUG_OF_AREA.get(area_of(home_category(p["primary_category"], p["categories"])), "other")
+
+
+def select_weekly(settings: Settings, papers: list[dict], scores: dict[str, float], n: int,
+                  vectors: dict[str, np.ndarray] | None, proportional: bool | None = None,
+                  cap: int | None = None) -> list[dict]:
+    """The weekly top-N. Default (TOP_SELECTION=proportional): each research area gets
+    slots in proportion to its share of the week's papers, filled by score."""
+    proportional = settings.top_selection == "proportional" if proportional is None else proportional
+    ranked = sorted((dict(p, total=scores[p["uid"]]) for p in papers if p["uid"] in scores),
+                    key=lambda r: r["total"], reverse=True)
+    home = {p["uid"]: home_category(p["primary_category"], p["categories"]) for p in papers}
+    if not proportional:
+        return select_top(ranked, home, n, settings.top_max_per_category if cap is None else cap, vectors)
+    group = {p["uid"]: area_slug(p) for p in papers}
+    sizes: dict[str, int] = {}
+    for p in papers:
+        sizes[group[p["uid"]]] = sizes.get(group[p["uid"]], 0) + 1
+    return select_top(ranked, home, n, 0, vectors, group_of=group, quotas=area_quotas(sizes, n))
 
 
 def fairness_report(db: Database, week: str, top: int = 50) -> dict:

@@ -7,7 +7,7 @@
     <p class="eyebrow">Weekly top {{ n }}{% if area %} · {{ area_slugs[area] }}{% endif %}{% if cat %} · {{ cat }}{% endif %}</p>
     <h1>{{ week }} <span class="muted thin">{{ week|week_label }}</span></h1>
     <p class="muted">Ranked from {{ "{:,}".format(total) }} papers submitted on {{ days_with_data }} day{{ 's' if days_with_data != 1 }}{% if days_with_data < 7 %} — <span class="live">week in progress, ranks can still change</span>{% endif %}.
-    {% if not cat %}At most {{ max_per_cat }} papers per category and no near-duplicates, so one busy field can't fill the list.{% endif %}</p>
+    {% if not cat and not area %}{% if selection == 'proportional' %}Each research area gets slots in proportion to its share of this week's papers (at least one), filled by score; near-duplicates are removed. <a href="/about#fairness">Why</a>{% else %}At most {{ max_per_cat }} papers per category and no near-duplicates.{% endif %}{% endif %}</p>
   </div>
   <div class="date-nav">
     <a class="btn ghost sm" href="/weekly?week={{ prev_week }}&n={{ n }}&cat={{ cat }}&area={{ area }}">← {{ prev_week }}</a>

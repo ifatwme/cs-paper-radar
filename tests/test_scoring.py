@@ -135,3 +135,19 @@ def test_venue_ranker_titles_and_false_friends():
     assert r.tier("Annual Meeting of the Association for Computational Linguistics")[0] == "A*"
     assert r.tier("SN Computer Science")[1] is None          # not "Science"
     assert r.tier("Nature Machine Intelligence")[1] == 1.0
+
+
+def test_area_quotas_proportional_with_floor():
+    from cs_paper_radar.scoring import area_quotas
+
+    q = area_quotas({"ai": 700, "media": 500, "theory": 120, "security": 80, "tiny": 5}, 20)
+    assert sum(q.values()) == 20 and "tiny" not in q
+    assert q["ai"] > q["media"] > q["theory"] >= q["security"] >= 1
+
+
+def test_select_top_quotas_release_unfilled_slots():
+    ranked = [{"uid": f"a{i}", "total": 0.9 - i / 100} for i in range(6)] + [{"uid": "b0", "total": 0.1}]
+    group = {**{f"a{i}": "ai" for i in range(6)}, "b0": "theory"}
+    picks = select_top(ranked, {}, 4, 0, group_of=group, quotas={"ai": 2, "theory": 2})
+    # theory has one paper only: its spare slot goes to the next best AI paper
+    assert [p["uid"] for p in picks] == ["a0", "a1", "a2", "b0"]

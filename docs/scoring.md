@@ -70,6 +70,15 @@ fallback CORE2023), cached in `DATA_DIR/core_ranks.csv` and refreshed every 30 d
   effect).
 * **Team size** and **number of cross-listed categories**: not related to quality and easy to game.
 
+## Weekly selection
+
+Scores are percentiles within each area, so the weekly list mirrors the week: each area gets
+`round(N × its share of the week's papers)` slots (largest-remainder method; areas with ≥ 20 papers get
+at least one), filled by score. Near-duplicates (cosine > 0.93) are skipped and slots an area cannot
+fill go to the best remaining papers. `TOP_SELECTION=cap` restores a plain global ranking with at most
+`TOP_MAX_PER_CATEGORY` papers per category. `/api/fairness?week=` shows each area's share of papers
+vs. share of the top picks.
+
 ## Freshness
 
 | Data | Refresh |

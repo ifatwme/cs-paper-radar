@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
-from cs_paper_radar.db import Database, iso_week
+from cs_paper_radar.db import Database, iso_week, week_bounds
 from cs_paper_radar.topics import TopicEngine, VectorIndex
 
 from .conftest import DAYS, START
@@ -24,7 +24,14 @@ def test_pipeline_populates_everything(populated):
     # diversity cap is respected
     from collections import Counter
 
-    assert max(Counter(p["primary_category"] for p in picks).values()) <= populated.top_max_per_category
+    # proportional selection: each area's share of the picks follows its share of papers
+    from cs_paper_radar.scoring import area_quotas, area_slug
+
+    week_papers = db.papers_between(*[d.isoformat() for d in week_bounds(last_week)])
+    sizes = Counter(area_slug(p) for p in week_papers)
+    quotas = area_quotas(dict(sizes), len(picks))
+    got = Counter(area_slug(p) for p in picks)
+    assert all(abs(got[a] - q) <= 1 for a, q in quotas.items()), (got, quotas)
     # corpus signals were computed once history exists
     assert all(p["novelty"] is not None and p["momentum"] is not None for p in picks)
     # without enrichment, external signals are "not measured", not zero

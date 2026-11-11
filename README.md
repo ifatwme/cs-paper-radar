@@ -38,6 +38,9 @@ The score is a weighted mean of up to eight signals, built to be **reliable, hon
 - **Honest:** a signal with no information for a cohort is marked *not measured* and the other weights
   are rescaled; each score shows how much of the weight was measured, and each paper page shows the
   raw numbers behind every signal.
+- **Proportional weekly list:** each research area gets slots in the weekly top N in proportion to its
+  share of the week's papers (at least one), filled by score. `/api/fairness` reports, per area, the
+  share of papers vs. share of picks and how much of the score was measured.
 - **No prestige proxies:** author h-index, team size and cross-listing are shown but not scored.
 - **Maturing:** the last 13 weeks are re-scored daily as citations, upvotes and stars arrive.
 
@@ -86,7 +89,8 @@ All settings are environment variables (see `.env.example`):
 |---|---|---|
 | `ARXIV_CATEGORIES` | `cs.*,eess.SY,eess.SP,eess.AS,eess.IV` | arXiv scope |
 | `TOP_N` | `20` | size of the weekly list (the page also accepts `?n=`) |
-| `TOP_MAX_PER_CATEGORY` | `4` | diversity cap in the weekly list |
+| `TOP_SELECTION` | `proportional` | weekly list: area slots proportional to volume, or `cap` (global ranking + per-category cap) |
+| `TOP_MAX_PER_CATEGORY` | `4` | per-category cap when `TOP_SELECTION=cap` |
 | `TOP_CS_PRIMARY_ONLY` | `true` | weekly picks only from papers whose primary category is CS/EESS |
 | `SCORE_WEIGHTS` | – | per-signal weight overrides |
 | `EMBEDDINGS` | `fastembed` | `fastembed` (local ONNX model), `hash` (no model, for tests), `off` (keywords only) |

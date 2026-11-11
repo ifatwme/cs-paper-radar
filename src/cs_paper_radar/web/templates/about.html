@@ -31,7 +31,7 @@
 <li><b>Scores mature.</b> Evidence keeps arriving, so the last {{ settings.rescore_weeks }} weeks are re-scored on every update. Rankings of the current week are provisional; older weeks settle as citations accumulate.</li>
 </ul>
 {% if fairness and fairness.areas %}
-<h3>Fairness check — {{ fairness.week }}</h3>
+<h3 id="fairness">Fairness check — {{ fairness.week }}</h3>
 <p class="muted small">Share of the week's papers vs. share of its top {{ fairness.top }}, and how much of the score could be measured. Live data: <a href="/api/fairness">/api/fairness</a>.</p>
 <table class="breakdown">
 <thead><tr><th>Area</th><th class="r">Papers</th><th class="r">Share</th><th class="r">Share of top {{ fairness.top }}</th><th class="r">Measured weight</th><th>Signals measured (share of papers)</th></tr></thead>
@@ -42,7 +42,7 @@
 {% endfor %}
 </tbody></table>
 {% endif %}
-<p>The weekly top {{ settings.top_n }} takes at most {{ settings.top_max_per_category }} papers per category and skips near-duplicates. Weights are configurable (<code>SCORE_WEIGHTS</code>).</p>
+<p><b>Weekly selection.</b> Because every score is a percentile within its own area, a fair list should mirror the week: each research area gets slots in the weekly top {{ settings.top_n }} in proportion to its share of the week's papers (largest-remainder method, at least one slot per area), and the slots are filled by score. Near-duplicates are skipped; unfilled slots go to the best remaining papers. Weights are configurable (<code>SCORE_WEIGHTS</code>); <code>TOP_SELECTION=cap</code> switches to a plain ranking with at most {{ settings.top_max_per_category }} papers per category.</p>
 
 <h2>Topics</h2>
 <p>A topic query is matched two ways: BM25 keyword search over titles and abstracts (the query words close together, falling back to all words anywhere), and semantic search with sentence embeddings (<code>{{ settings.embedding_model }}</code>, run locally). Results are fused by reciprocal rank. For the matching papers the radar shows:</p>

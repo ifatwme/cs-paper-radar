@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from .. import __version__
 from ..config import Settings, get_settings
 from ..db import SIGNALS, Database, iso_week, week_bounds
-from ..scoring import fairness_report, select_top
+from ..scoring import fairness_report, select_weekly
 from ..taxonomy import (
     AREA_SLUGS,
     AREAS,
@@ -130,22 +130,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             counts[p["area_slug"]] = counts.get(p["area_slug"], 0) + 1
         return [{"slug": s, "name": n, "n": counts.get(s, 0)} for s, n in AREA_SLUGS.items()]
 
+    _weekly_cache: dict[tuple, list[dict]] = {}
+
     def weekly_top(week: str, n: int, category: str | None = None, area: str | None = None) -> list[dict]:
-        if not category and not area:
-            picks = db.weekly_picks(week)
-            if len(picks) >= n:
-                return decorate(picks[:n])
+        """Top-N of a week, selected with the same rule as the stored picks (cached
+        per data version)."""
+        key = (week, n, category, area, db.data_version())
+        if key in _weekly_cache:
+            return _weekly_cache[key]
         start, end = week_bounds(week)
         papers = decorate(db.papers_between(start.isoformat(), end.isoformat(), category, scored_only=True))
         if area:
             papers = [p for p in papers if p["area_slug"] == area]
         if settings.top_cs_primary_only:
             papers = [p for p in papers if p["primary_category"] in CATEGORY_NAMES]
-        vectors = {p["uid"]: v for p in papers[: n * 5] if (v := index.vector(p["uid"])) is not None}
-        home = {p["uid"]: p["home"] for p in papers}
-        return select_top(papers, home, n=n,
-                          max_per_category=0 if category else settings.top_max_per_category,
-                          vectors=vectors)
+        vectors = {p["uid"]: v for p in papers[: n * 8] if (v := index.vector(p["uid"])) is not None}
+        scores = {p["uid"]: p["total"] for p in papers}
+        by_uid = {p["uid"]: p for p in papers}
+        # Filtered views (one category/area) are plain rankings; the full week uses
+        # the configured selection rule (proportional area slots by default).
+        picks = select_weekly(settings, papers, scores, n, vectors,
+                              proportional=None if not (category or area) else False,
+                              cap=0 if (category or area) else None)
+        out = [by_uid[r["uid"]] for r in picks]
+        if len(_weekly_cache) > 256:
+            _weekly_cache.clear()
+        _weekly_cache[key] = out
+        return out
 
     # ----------------------------------------------------------------- HTML
     @app.get("/healthz", response_class=PlainTextResponse, include_in_schema=False)
@@ -215,6 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             total=total, days_with_data=days_with_data, prev_week=_shift_week(week, -1),
             next_week=_shift_week(week, 1), weeks=db.available_weeks(26), latest_week=latest_week(),
             all_categories=CATEGORY_NAMES, max_per_cat=settings.top_max_per_category,
+            selection=settings.top_selection,
         )
 
     @app.get("/topic", response_class=HTMLResponse, include_in_schema=False)
