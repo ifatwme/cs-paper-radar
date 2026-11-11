@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from .config import Settings
 from .db import Database, iso_week
 from .embed import embedder_name, get_embedder, text_hash
+from .enrich import run_enrichment
 from .scoring import score_week
 from .sources import get_source
 from .text import keyphrases
@@ -123,7 +124,7 @@ def heal(settings: Settings, db: Database, before: date) -> dict:
 
 
 def run(settings: Settings, kind: str, start: date, end: date, rescore_from: date | None = None,
-        heal_gaps: bool = False) -> dict:
+        heal_gaps: bool = False, enrich: bool = False) -> dict:
     db = Database(settings.db_path)
     db.init()
     with pipeline_lock(settings):
@@ -137,6 +138,8 @@ def run(settings: Settings, kind: str, start: date, end: date, rescore_from: dat
                     rescore_from = min([rescore_from or start] + [date.fromisoformat(d) for d in stats["heal"]["days"]])
             stats["embedded"] = embed_missing(settings, db)
             stats["keyphrases"] = extract_keyphrases(db)
+            if enrich:
+                stats["enrich"] = run_enrichment(settings, db)
             stats["scored"] = score(settings, db, weeks_between(rescore_from or start, end))
             status = "ok" if not (stats["ingest"]["failed_days"] or stats["ingest"].get("partial_days")) else "partial"
         except BaseException as exc:
@@ -150,9 +153,23 @@ def run(settings: Settings, kind: str, start: date, end: date, rescore_from: dat
 def daily_update(settings: Settings) -> dict:
     today = datetime.now(timezone.utc).date()
     start = today - timedelta(days=settings.update_lookback_days)
-    # Re-score from the start of the previous week: late arrivals change ranks.
-    rescore_from = min(start, today - timedelta(days=today.weekday() + 7))
-    return run(settings, "update", start, today, rescore_from=rescore_from, heal_gaps=True)
+    # Citations, stars and upvotes keep arriving: re-score the last RESCORE_WEEKS weeks.
+    rescore_from = min(start, today - timedelta(weeks=settings.rescore_weeks))
+    return run(settings, "update", start, today, rescore_from=rescore_from, heal_gaps=True, enrich=True)
+
+
+def enrich_and_rescore(settings: Settings, weeks: int | None = None) -> dict:
+    """Fetch external evidence and re-score, without touching arXiv."""
+    db = Database(settings.db_path)
+    db.init()
+    today = datetime.now(timezone.utc).date()
+    with pipeline_lock(settings):
+        run_id = db.start_run("enrich")
+        stats = {"enrich": run_enrichment(settings, db, today)}
+        stats["scored"] = score(settings, db, weeks_between(
+            today - timedelta(weeks=weeks or settings.rescore_weeks), today))
+        db.finish_run(run_id, "ok", stats)
+        return stats
 
 
 def backfill(settings: Settings, start: date, end: date) -> dict:

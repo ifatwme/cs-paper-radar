@@ -27,17 +27,21 @@ def _env_list(name: str, default: str) -> list[str]:
     return [x.strip() for x in _env(name, default).split(",") if x.strip()]
 
 
-# Default weights of the composite "frontier score" (see docs/scoring.md).
+# Default weights of the composite score (see docs/scoring.md). Every signal is a
+# percentile within the paper's cohort (same research area, same ISO week), so a
+# theory paper is compared with theory papers of the same age, not with ML papers.
+# Signals that carry no information for a cohort (e.g. nobody in it has citations
+# yet) are left out and the remaining weights are renormalised.
 DEFAULT_WEIGHTS = {
-    "venue": 0.20,      # accepted / to appear at a recognised venue
-    "artifacts": 0.15,  # code, data, models or project page released
-    "momentum": 0.20,   # its research neighbourhood is growing this week
-    "novelty": 0.20,    # far from everything published in the previous months
-    "breadth": 0.10,    # cross-listed across several categories
-    "substance": 0.10,  # full paper (pages/figures/journal ref), not a stub
-    "team": 0.05,       # collaboration size (weak, capped)
+    "citations": 0.20,  # Semantic Scholar citations (+ influential), age- and field-normalised
+    "community": 0.10,  # Hugging Face daily-papers upvotes
+    "adoption": 0.10,   # GitHub stars of the released code
+    "venue": 0.15,      # verified / self-reported venue, tiered with the CORE ranking
+    "artifacts": 0.10,  # code, data, models or project page released
+    "novelty": 0.15,    # far from everything published in the previous months
+    "momentum": 0.15,   # its research neighbourhood is growing this week
+    "substance": 0.05,  # full paper rather than a short note
 }
-
 
 def _weights() -> dict[str, float]:
     """`SCORE_WEIGHTS="venue=0.3,novelty=0.3"` overrides individual weights."""
@@ -102,6 +106,26 @@ class Settings:
         default_factory=lambda: _env_int("MOMENTUM_BASELINE_WEEKS", 4)
     )
     weights: dict[str, float] = field(default_factory=_weights)
+    # Percentiles are computed within (area, week) cohorts of at least this size;
+    # smaller cohorts fall back to the whole week.
+    cohort_min_size: int = field(default_factory=lambda: _env_int("COHORT_MIN_SIZE", 40))
+    # A cohort-level signal counts only if at least this share of the cohort has a
+    # non-zero value (otherwise it says nothing about that cohort).
+    signal_min_coverage: float = field(default_factory=lambda: _env_float("SIGNAL_MIN_COVERAGE", 0.03))
+    # Weeks re-scored by each update: citations, stars and upvotes keep arriving.
+    rescore_weeks: int = field(default_factory=lambda: _env_int("RESCORE_WEEKS", 13))
+
+    # Enrichment (external evidence)
+    enrichers: list[str] = field(
+        default_factory=lambda: _env_list("ENRICHERS", "semantic_scholar,huggingface,github"))
+    enrich_budget_s: float = field(default_factory=lambda: _env_float("ENRICH_BUDGET_S", 1200))
+    s2_api_key: str = field(default_factory=lambda: _env("S2_API_KEY", ""))
+    s2_max_batches: int = field(default_factory=lambda: _env_int("S2_MAX_BATCHES", 40))
+    s2_max_batches_keyed: int = field(default_factory=lambda: _env_int("S2_MAX_BATCHES_KEYED", 200))
+    hf_days: int = field(default_factory=lambda: _env_int("HF_DAYS", 30))
+    github_token: str = field(default_factory=lambda: _env("GITHUB_TOKEN", ""))
+    github_max_requests: int = field(default_factory=lambda: _env_int("GITHUB_MAX_REQUESTS", 50))
+    github_max_requests_keyed: int = field(default_factory=lambda: _env_int("GITHUB_MAX_REQUESTS_KEYED", 3000))
 
     # Web
     vector_cache_days: int = field(default_factory=lambda: _env_int("VECTOR_CACHE_DAYS", 400))

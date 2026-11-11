@@ -1,22 +1,31 @@
-"""Transparent composite "frontier score".
+"""Fair, evidence-based paper score (v2).
 
-Every paper gets seven signals in [0, 1]; the total is their weighted sum
-(weights in `config.DEFAULT_WEIGHTS`, overridable with SCORE_WEIGHTS). Each
-signal stores the evidence that produced it, so the UI can explain every rank.
+Eight signals in [0, 1]; the total is their weighted mean (weights in
+`config.DEFAULT_WEIGHTS`, overridable with SCORE_WEIGHTS):
 
-Metadata signals (per paper):
-    venue      accepted / to appear at a recognised venue, journal ref, DOI
-    artifacts  code, data, models or a project page are released
-    breadth    cross-listed in several categories / research areas
-    substance  full paper (pages, figures) rather than a short note
-    team       collaboration size (weak, capped)
+  external evidence (enrich/)        citations   Semantic Scholar citations + 2 x influential
+                                     community   Hugging Face daily-papers upvotes
+                                     adoption    GitHub stars of the paper's code
+  the paper itself                   venue       verified or self-reported venue, CORE-tiered
+                                     artifacts   code / data / models released
+                                     substance   full paper rather than a short note
+  the research landscape             novelty     distance to everything of the previous 90 days
+  (embeddings)                       momentum    growth of the paper's research neighbourhood
 
-Corpus signals (need embeddings, computed per ISO week):
-    novelty    1 - similarity to the closest paper of the previous N days,
-               as a percentile within the week
-    momentum   how many same-week papers sit in the paper's neighbourhood,
-               relative to the expected count from the baseline weeks
-               (growth of its research direction), as a percentile
+Fairness rules
+  * Cohorts: citations, community, adoption, novelty and momentum are percentiles
+    within the paper's (research area, ISO week) cohort, so papers are compared
+    with papers of the same age and field. Citation counts differ by an order of
+    magnitude between ML and theory; raw counts would mostly measure field size.
+  * Missing is not zero: a cohort-level signal is used only when it carries
+    information for that cohort (enough papers have a non-zero value). Otherwise
+    it is dropped for the whole cohort and the remaining weights are renormalised.
+    `coverage` records the share of the total weight that was actually measured.
+  * Self-reported claims count less than verified ones (venue from Semantic
+    Scholar / journal ref > "accepted at X" in the arXiv comment).
+  * No prestige proxies in the total: author h-index, team size and number of
+    cross-listed categories are shown as information only (Matthew effect,
+    gameable).
 """
 
 from __future__ import annotations
@@ -30,11 +39,12 @@ import numpy as np
 
 from .config import Settings
 from .db import Database, week_bounds
-from .taxonomy import CATEGORY_NAMES, area_of, home_category
+from .taxonomy import AREA_SLUGS, CATEGORY_NAMES, SLUG_OF_AREA, area_of, home_category
+from .venues import VenueRanker, load_ranker
 
 log = logging.getLogger(__name__)
 
-SCORING_VERSION = 1
+SCORING_VERSION = 2
 
 # --------------------------------------------------------------------- venues
 VENUES = [
@@ -84,25 +94,43 @@ _UNDER_REVIEW_RE = re.compile(r"\b(under review|submitted to|in submission|prepr
 _WORKSHOP_RE = re.compile(r"\bworkshop\b", re.I)
 
 
-def venue_signal(comment: str, journal_ref: str, doi: str) -> tuple[float, str]:
-    text = f"{comment} {journal_ref}"
-    venue = _VENUE_RE.search(text)
-    accepted = _ACCEPTED_RE.search(comment)
-    workshop = _WORKSHOP_RE.search(text)
+_SYMPOSIUM_SERIES_RE = re.compile(r"symposium series|companion|extended abstract|poster|doctoral|"
+                                  r"findings of", re.I)
+
+
+def venue_signal(comment: str, journal_ref: str, doi: str, s2_venue: str = "",
+                 s2_venue_type: str = "", ranker: VenueRanker | None = None) -> tuple[float, str]:
+    """Tiered venue evidence. Verified sources (Semantic Scholar venue, journal ref)
+    count fully; an acceptance claim in the arXiv comment counts 90%."""
+    ranker = ranker or VenueRanker([])
+
+    def tiered(name: str, default: float) -> tuple[float, str]:
+        tier, value, how = ranker.tier(name)
+        value = default if value is None else value
+        if _WORKSHOP_RE.search(name) or _SYMPOSIUM_SERIES_RE.search(name):
+            value *= 0.6
+            how = (how + ", " if how else "") + "workshop/companion"
+        return value, how
+
+    if s2_venue:
+        value, how = tiered(s2_venue, 0.6)
+        return round(value, 4), f"published: {s2_venue[:80]} (Semantic Scholar{'; ' + how if how else ''})"
     if journal_ref:
-        return (0.7 if workshop else 0.95), f"journal ref: {journal_ref[:80]}"
-    if accepted and venue:
-        if workshop:
-            return 0.6, f"accepted (workshop): {venue.group(1)}"
-        return 1.0, f"accepted: {venue.group(1)}"
+        value, how = tiered(journal_ref, 0.6)
+        return round(value, 4), f"journal ref: {journal_ref[:80]}{' (' + how + ')' if how else ''}"
+    accepted = _ACCEPTED_RE.search(comment)
+    venue = _VENUE_RE.search(comment)
+    if accepted and not _UNDER_REVIEW_RE.search(comment[: accepted.start()] or ""):
+        name = venue.group(1) if venue else comment
+        value, how = tiered(comment if venue is None else f"{name} {comment}", 0.55)
+        return round(0.9 * value, 4), f"self-reported: {comment[:80]}{' (' + how + ')' if how else ''}"
     if _UNDER_REVIEW_RE.search(comment):
-        return 0.1, "under review / submitted"
-    if accepted:
-        return (0.5 if workshop else 0.75), f"accepted: {accepted.group(0)}"
+        return 0.05, "under review / submitted"
     if venue:
-        return (0.4 if workshop else 0.6), f"venue mentioned: {venue.group(1)}"
+        value, how = tiered(venue.group(1), 0.5)
+        return round(0.5 * value, 4), f"venue mentioned, acceptance not stated: {venue.group(1)}"
     if doi:
-        return 0.6, f"DOI {doi}"
+        return 0.5, f"DOI {doi}"
     return 0.0, ""
 
 
@@ -186,16 +214,20 @@ _TAG_RULES = [
 ]
 
 
-def metadata_signals(paper: dict) -> dict:
-    venue, venue_why = venue_signal(paper["comment"], paper["journal_ref"], paper["doi"])
+def metadata_signals(paper: dict, ranker: VenueRanker | None = None) -> dict:
+    venue, venue_why = venue_signal(paper["comment"], paper["journal_ref"], paper["doi"],
+                                    paper.get("s2_venue") or "", paper.get("s2_venue_type") or "",
+                                    ranker)
     artifacts, art_why = artifacts_signal(paper["abstract"], paper["comment"])
     breadth, breadth_why = breadth_signal(paper["categories"] or [paper["primary_category"]])
     substance, sub_why = substance_signal(paper["comment"], paper["journal_ref"], paper["abstract"])
     team, team_why = team_signal(paper["n_authors"])
     text = f"{paper['title']} {paper['abstract']}"
     tags = [name for name, rx in _TAG_RULES if rx.search(text)]
-    if venue >= 0.95:
-        tags.insert(0, "accepted")
+    if venue >= 0.8:
+        tags.insert(0, "top venue")
+    elif venue >= 0.4:
+        tags.insert(0, "published")
     if artifacts >= 0.8:
         tags.append("code/data")
     return {
@@ -289,11 +321,11 @@ def corpus_signals(settings: Settings, db: Database, model: str, week: str) -> d
         novelty = percentile_rank(novelty_raw)
         for u, n_raw, n in zip(week_uids, novelty_raw, novelty):
             out[u]["novelty"] = round(float(n), 4)
+            out[u]["novelty_raw"] = float(n_raw)
             out[u]["details"]["novelty"] = f"closest earlier paper: similarity {1 - n_raw:.2f}"
     else:
         for u in week_uids:
-            out[u]["novelty"] = 0.5
-            out[u]["details"]["novelty"] = "not enough history yet (neutral)"
+            out[u]["details"]["novelty"] = "not enough history yet (not used)"
 
     # Momentum: neighbours this week vs. expected from the baseline weeks.
     base_mask = (dates_arr >= base_start.isoformat()) & (dates_arr < start.isoformat())
@@ -307,8 +339,9 @@ def corpus_signals(settings: Settings, db: Database, model: str, week: str) -> d
         # A direction needs some mass to count as "moving": damp tiny neighbourhoods.
         raw = growth * np.minimum(1.0, c_now / 3.0) + 0.05 * np.log1p(c_now)
         momentum = percentile_rank(raw)
-        for u, m, cn, ex in zip(week_uids, momentum, c_now, expected):
+        for u, m, cn, ex, r in zip(week_uids, momentum, c_now, expected, raw):
             out[u]["momentum"] = round(float(m), 4)
+            out[u]["momentum_raw"] = float(r)
             out[u]["details"]["momentum"] = (
                 f"{int(cn)} close papers this week vs {ex:.1f} expected from the previous "
                 f"{settings.momentum_baseline_weeks} weeks"
@@ -317,8 +350,41 @@ def corpus_signals(settings: Settings, db: Database, model: str, week: str) -> d
         log.info("week %s: momentum threshold %.3f, median neighbours %.0f", week, thr, np.median(c_now))
     else:
         for u in week_uids:
-            out[u]["momentum"] = 0.5
-            out[u]["details"]["momentum"] = "not enough baseline yet (neutral)"
+            out[u]["details"]["momentum"] = "not enough baseline yet (not used)"
+    return out
+
+
+def cohort_percentile(values: np.ndarray, zero_is_none: bool) -> np.ndarray:
+    """Mid-rank percentile in (0, 1]; with `zero_is_none`, zero counts map to 0
+    (no evidence) instead of sharing the bottom rank."""
+    pct = percentile_rank(values.astype(float))
+    if zero_is_none:
+        pct = np.where(values > 0, pct, 0.0)
+    return pct
+
+
+# cohort-level signals: name -> (raw value getter, zero means "no evidence")
+COHORT_SIGNALS = {
+    "citations": (lambda p, c: (p.get("n_citations") or 0) + 2 * (p.get("n_influential") or 0), True),
+    "community": (lambda p, c: p.get("n_upvotes") or 0, True),
+    "adoption": (lambda p, c: p.get("n_stars") or 0, True),
+    "novelty": (lambda p, c: c.get("novelty_raw"), False),
+    "momentum": (lambda p, c: c.get("momentum_raw"), False),
+}
+
+
+def _cohorts(papers: list[dict], min_size: int) -> dict[str, list[int]]:
+    """Index lists per research area; small areas are pooled into 'mixed'."""
+    groups: dict[str, list[int]] = {}
+    for i, p in enumerate(papers):
+        area = SLUG_OF_AREA.get(area_of(home_category(p["primary_category"], p["categories"])), "other")
+        groups.setdefault(area, []).append(i)
+    out: dict[str, list[int]] = {}
+    for area, idx in groups.items():
+        out.setdefault(area if len(idx) >= min_size else "mixed", []).extend(idx)
+    if "mixed" in out and len(out["mixed"]) < min_size and len(out) > 1:
+        # still too small: compare against the whole week
+        out["mixed"] = list(range(len(papers)))
     return out
 
 
@@ -329,31 +395,75 @@ def score_week(settings: Settings, db: Database, model: str | None, week: str) -
     if not papers:
         return 0
     corpus = corpus_signals(settings, db, model, week) if model else {}
+    ranker = load_ranker(str(settings.data_dir))
     w = settings.weights
+    n = len(papers)
+    meta = [metadata_signals(p, ranker) for p in papers]
+    corp = [corpus.get(p["uid"], {}) for p in papers]
+
+    # Cohort-normalised signals; None = not measured for this paper's cohort.
+    cohort_vals: dict[str, list[float | None]] = {k: [None] * n for k in COHORT_SIGNALS}
+    cohort_notes: dict[str, list[str]] = {k: [""] * n for k in COHORT_SIGNALS}
+    for cname, idx in _cohorts(papers, settings.cohort_min_size).items():
+        label = AREA_SLUGS.get(cname, "mixed areas")
+        for sig, (getter, zero_none) in COHORT_SIGNALS.items():
+            raw = [getter(papers[i], corp[i]) for i in idx]
+            have = [i for i, r in zip(idx, raw) if r is not None]
+            if len(have) < max(5, len(idx) // 2):
+                continue
+            vals = np.array([getter(papers[i], corp[i]) for i in have], dtype=float)
+            if zero_none:
+                nonzero = int((vals > 0).sum())
+                if nonzero < 3 or nonzero / len(have) < settings.signal_min_coverage:
+                    for i in idx:
+                        cohort_notes[sig][i] = (f"not used: only {nonzero} of {len(have)} {label} papers "
+                                                f"this week have any")
+                    continue
+            pct = cohort_percentile(vals, zero_none)
+            for i, v in zip(have, pct):
+                cohort_vals[sig][i] = round(float(v), 4)
+                cohort_notes[sig][i] = f"percentile among {len(have)} {label} papers of {week}"
+
     rows = []
-    for p in papers:
-        meta = metadata_signals(p)
-        corp = corpus.get(p["uid"], {})
-        signals = {
-            "venue": meta["venue"],
-            "artifacts": meta["artifacts"],
-            "breadth": meta["breadth"],
-            "substance": meta["substance"],
-            "team": meta["team"],
-            "novelty": corp.get("novelty", 0.5),
-            "momentum": corp.get("momentum", 0.5),
+    for i, p in enumerate(papers):
+        m, c = meta[i], corp[i]
+        signals: dict[str, float | None] = {
+            "venue": m["venue"], "artifacts": m["artifacts"], "substance": m["substance"],
+            **{k: cohort_vals[k][i] for k in COHORT_SIGNALS},
         }
-        details = {**meta["details"], **corp.get("details", {})}
-        details.setdefault("novelty", "no embedding (neutral)")
-        details.setdefault("momentum", "no embedding (neutral)")
-        tags = list(meta["tags"])
-        if signals["momentum"] >= 0.95 and corp.get("neighbours_week", 0) >= 5:
+        available = {k: v for k, v in signals.items() if v is not None and k in w}
+        wsum = sum(w[k] for k in available)
+        total = sum(w[k] * v for k, v in available.items()) / wsum if wsum else 0.0
+        details = dict(m["details"])
+        details.update({k: v for k, v in c.get("details", {}).items()})
+        raw_text = {
+            "citations": f"{p.get('n_citations') or 0} citations, {p.get('n_influential') or 0} influential",
+            "community": f"{p.get('n_upvotes') or 0} upvotes on Hugging Face",
+            "adoption": (f"{p.get('n_stars') or 0} stars on github.com/{p['github_repo']}"
+                         if p.get("github_repo") else "no code repository found"),
+        }
+        for k in COHORT_SIGNALS:
+            note = cohort_notes[k][i]
+            base = raw_text.get(k) or details.get(k, "")
+            if k in raw_text and p.get("n_citations") is None and k == "citations":
+                base = "not in Semantic Scholar yet"
+            details[k] = f"{base} — {note}" if note and base else (note or base)
+        tags = list(m["tags"])
+        if (signals["momentum"] or 0) >= 0.95 and c.get("neighbours_week", 0) >= 5:
             tags.append("hot direction")
-        if signals["novelty"] >= 0.97:
+        if (signals["novelty"] or 0) >= 0.97:
             tags.append("unusual")
-        total = sum(w[k] * signals[k] for k in w)
-        rows.append({"uid": p["uid"], "total": round(total, 4), **signals,
-                     "tags": tags, "details": details})
+        if (signals["citations"] or 0) >= 0.95 and (p.get("n_citations") or 0) >= 3:
+            tags.append("highly cited")
+        if (p.get("n_upvotes") or 0) >= 20:
+            tags.append("community pick")
+        if (p.get("n_stars") or 0) >= 100:
+            tags.append("popular code")
+        rows.append({
+            "uid": p["uid"], "total": round(total, 4), "coverage": round(wsum, 4),
+            **{k: (v if v is not None else None) for k, v in signals.items()},
+            "breadth": m["breadth"], "team": m["team"], "tags": tags, "details": details,
+        })
     db.save_scores(rows)
     primary = {p["uid"]: p["primary_category"] for p in papers}
     eligible = [r for r in rows

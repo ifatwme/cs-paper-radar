@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--end", type=_date, default=None)
 
     sub.add_parser("embed", help="embed papers that have no vector yet")
+    p = sub.add_parser("enrich", help="fetch citations/upvotes/stars and re-score recent weeks")
+    p.add_argument("--weeks", type=int, default=None, help="weeks to re-score (default RESCORE_WEEKS)")
     sub.add_parser("stats", help="print database statistics")
 
     p = sub.add_parser("top", help="print the top papers of an ISO week")
@@ -77,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "rescore":
         end = args.end or datetime.now(timezone.utc).date()
         print(json.dumps(pipeline.rescore(settings, args.start, end), indent=2))
+    elif args.cmd == "enrich":
+        print(json.dumps(pipeline.enrich_and_rescore(settings, args.weeks), indent=2))
     elif args.cmd == "embed":
         db.init()
         print(pipeline.embed_missing(settings, db))

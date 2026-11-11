@@ -11,7 +11,7 @@ import re
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -86,13 +86,19 @@ CREATE TABLE IF NOT EXISTS embeddings (
 CREATE TABLE IF NOT EXISTS scores (
     uid         TEXT PRIMARY KEY REFERENCES papers(uid) ON DELETE CASCADE,
     total       REAL NOT NULL,
-    venue       REAL NOT NULL,
-    artifacts   REAL NOT NULL,
-    momentum    REAL NOT NULL,
-    novelty     REAL NOT NULL,
-    breadth     REAL NOT NULL,
-    substance   REAL NOT NULL,
-    team        REAL NOT NULL,
+    coverage    REAL,                         -- share of the total weight actually measured
+    -- signals in [0, 1]; NULL = not measured for this paper's cohort
+    citations   REAL,
+    community   REAL,
+    adoption    REAL,
+    venue       REAL,
+    artifacts   REAL,
+    novelty     REAL,
+    momentum    REAL,
+    substance   REAL,
+    -- information only (not part of the total)
+    breadth     REAL,
+    team        REAL,
     tags        TEXT NOT NULL DEFAULT '[]',   -- JSON list of badges
     details     TEXT NOT NULL DEFAULT '{}',   -- JSON: evidence behind each signal
     computed_at TEXT NOT NULL
@@ -105,6 +111,35 @@ CREATE TABLE IF NOT EXISTS weekly_picks (
     uid      TEXT NOT NULL REFERENCES papers(uid) ON DELETE CASCADE,
     total    REAL NOT NULL,
     PRIMARY KEY (week, rank)
+);
+
+-- External evidence (enrich/): latest values per paper.
+CREATE TABLE IF NOT EXISTS paper_metrics (
+    uid            TEXT PRIMARY KEY REFERENCES papers(uid) ON DELETE CASCADE,
+    s2_id          TEXT,
+    citations      INTEGER,
+    influential    INTEGER,
+    s2_venue       TEXT,
+    s2_venue_type  TEXT,
+    max_h_index    INTEGER,
+    s2_fetched     TEXT,
+    hf_upvotes     INTEGER,
+    hf_comments    INTEGER,
+    hf_fetched     TEXT,
+    github_repo    TEXT,
+    repo_checked   INTEGER,
+    github_stars   INTEGER,
+    github_fetched TEXT
+);
+-- Daily snapshots, for growth over time.
+CREATE TABLE IF NOT EXISTS metric_history (
+    uid          TEXT NOT NULL REFERENCES papers(uid) ON DELETE CASCADE,
+    day          TEXT NOT NULL,
+    citations    INTEGER,
+    influential  INTEGER,
+    hf_upvotes   INTEGER,
+    github_stars INTEGER,
+    PRIMARY KEY (uid, day)
 );
 
 -- One row per (source, day): what the source reported vs. what we stored.
@@ -127,7 +162,9 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
-SIGNALS = ("venue", "artifacts", "momentum", "novelty", "breadth", "substance", "team")
+# Signals that make up the total score (v2). breadth/team are kept as information only.
+SIGNALS = ("citations", "community", "adoption", "venue", "artifacts", "novelty", "momentum", "substance")
+INFO_SIGNALS = ("breadth", "team")
 
 
 def utcnow() -> str:
@@ -205,6 +242,12 @@ class Database:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(papers)")}
             if "keyphrases" not in cols:  # migration for databases created by v0.1.0
                 conn.execute("ALTER TABLE papers ADD COLUMN keyphrases TEXT")
+            info = {r["name"]: r["notnull"] for r in conn.execute("PRAGMA table_info(scores)")}
+            if "coverage" not in info or info.get("momentum"):
+                # v0.1 scores (NOT NULL signals, no coverage): scores are derived data,
+                # so drop them; the next update/rescore recomputes everything.
+                conn.execute("DROP TABLE scores")
+                conn.executescript(SCHEMA)
 
     # ------------------------------------------------------------------ writes
     def upsert_papers(self, papers: Iterable[Paper]) -> tuple[int, int]:
@@ -270,6 +313,7 @@ class Database:
                         keyphrases=NULL, last_seen=:now WHERE uid=:uid""",
                         values,
                     )
+                    conn.execute("UPDATE paper_metrics SET repo_checked = NULL WHERE uid = ?", (p.uid,))
                     updated += 1
                 else:
                     conn.execute("UPDATE papers SET last_seen=? WHERE uid=?", (now, p.uid))
@@ -305,9 +349,10 @@ class Database:
         with self.session() as conn:
             conn.executemany(
                 """INSERT OR REPLACE INTO scores(uid, total, venue, artifacts, momentum, novelty,
-                breadth, substance, team, tags, details, computed_at) VALUES (:uid, :total,
-                :venue, :artifacts, :momentum, :novelty, :breadth, :substance, :team, :tags,
-                :details, :computed_at)""",
+                breadth, substance, team, citations, community, adoption, coverage, tags, details,
+                computed_at) VALUES (:uid, :total, :venue, :artifacts, :momentum, :novelty, :breadth,
+                :substance, :team, :citations, :community, :adoption, :coverage, :tags, :details,
+                :computed_at)""",
                 [
                     {
                         **r,
@@ -326,6 +371,126 @@ class Database:
                 "INSERT INTO weekly_picks(week, rank, uid, total) VALUES (?,?,?,?)",
                 [(week, i + 1, uid, total) for i, (uid, total) in enumerate(picks)],
             )
+
+    # ------------------------------------------------------------ enrichment
+    @staticmethod
+    def _ago(days: float) -> str:
+        return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+
+    def s2_due(self, today: date, limit: int = 500) -> list[tuple[str, str]]:
+        """arXiv papers whose Semantic Scholar data is missing or stale.
+        Refresh cadence by age: <=14 days daily, <=120 days weekly, older monthly."""
+        d = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
+        with self.session() as conn:
+            rows = conn.execute(
+                """SELECT p.uid, p.native_id FROM papers p LEFT JOIN paper_metrics m ON m.uid = p.uid
+                WHERE p.source = 'arxiv' AND p.pub_date <= :d1 AND (
+                    m.s2_fetched IS NULL
+                    OR (p.pub_date >= :d14 AND m.s2_fetched < :a1)
+                    OR (p.pub_date >= :d120 AND m.s2_fetched < :a7)
+                    OR m.s2_fetched < :a30)
+                ORDER BY m.s2_fetched IS NOT NULL, p.pub_date DESC LIMIT :limit""",
+                {"d1": d(1), "d14": d(14), "d120": d(120), "a1": self._ago(0.8),
+                 "a7": self._ago(7), "a30": self._ago(30), "limit": limit},
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def _ensure_metric_rows(self, conn, uids: list[str]) -> None:
+        conn.executemany("INSERT OR IGNORE INTO paper_metrics(uid) SELECT uid FROM papers WHERE uid = ?",
+                         [(u,) for u in uids])
+
+    def save_s2(self, rows: list[dict]) -> None:
+        now = utcnow()
+        with self.session() as conn:
+            self._ensure_metric_rows(conn, [r["uid"] for r in rows])
+            for r in rows:
+                if r.get("s2_id") is None:
+                    conn.execute("UPDATE paper_metrics SET s2_fetched=? WHERE uid=?", (now, r["uid"]))
+                    continue
+                conn.execute(
+                    """UPDATE paper_metrics SET s2_id=:s2_id, citations=:citations,
+                    influential=:influential, s2_venue=:s2_venue, s2_venue_type=:s2_venue_type,
+                    max_h_index=:max_h_index, s2_fetched=:now WHERE uid=:uid""",
+                    {**r, "now": now},
+                )
+
+    def save_hf(self, rows: list[dict]) -> int:
+        now = utcnow()
+        with self.session() as conn:
+            known = {r[0] for r in conn.execute(
+                f"SELECT uid FROM papers WHERE uid IN ({','.join('?' * len(rows))})",
+                [r["uid"] for r in rows])} if rows else set()
+            rows = [r for r in rows if r["uid"] in known]
+            self._ensure_metric_rows(conn, [r["uid"] for r in rows])
+            for r in rows:
+                conn.execute(
+                    """UPDATE paper_metrics SET hf_upvotes=:hf_upvotes, hf_comments=:hf_comments,
+                    hf_fetched=:now, github_repo=COALESCE(github_repo, :hf_github) WHERE uid=:uid""",
+                    {**r, "now": now},
+                )
+        return len(rows)
+
+    def extract_repos(self, extractor) -> int:
+        """Find GitHub links in papers not checked yet (or changed since)."""
+        found = 0
+        with self.session() as conn:
+            rows = conn.execute(
+                """SELECT p.uid, p.abstract, p.comment FROM papers p LEFT JOIN paper_metrics m
+                ON m.uid = p.uid WHERE m.repo_checked IS NULL"""
+            ).fetchall()
+            self._ensure_metric_rows(conn, [r["uid"] for r in rows])
+            for r in rows:
+                repo = extractor(r["abstract"], r["comment"])
+                found += repo is not None
+                conn.execute(
+                    "UPDATE paper_metrics SET repo_checked=1, github_repo=COALESCE(:repo, github_repo) "
+                    "WHERE uid=:uid", {"repo": repo, "uid": r["uid"]})
+        return found
+
+    def github_due(self, today: date, limit: int) -> list[tuple[str, str]]:
+        d = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
+        with self.session() as conn:
+            rows = conn.execute(
+                """SELECT p.uid, m.github_repo FROM papers p JOIN paper_metrics m ON m.uid = p.uid
+                WHERE m.github_repo IS NOT NULL AND p.pub_date >= :d180 AND (
+                    m.github_fetched IS NULL
+                    OR (p.pub_date >= :d30 AND m.github_fetched < :a2)
+                    OR m.github_fetched < :a14)
+                ORDER BY m.github_fetched IS NOT NULL, p.pub_date DESC LIMIT :limit""",
+                {"d180": d(180), "d30": d(30), "a2": self._ago(2), "a14": self._ago(14), "limit": limit},
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def save_github(self, rows: list[dict]) -> None:
+        now = utcnow()
+        with self.session() as conn:
+            conn.executemany(
+                "UPDATE paper_metrics SET github_stars=:github_stars, github_fetched=:now WHERE uid=:uid",
+                [{**r, "now": now} for r in rows])
+
+    def snapshot_metrics(self, day: str) -> None:
+        with self.session() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO metric_history(uid, day, citations, influential, hf_upvotes,
+                github_stars) SELECT uid, ?, citations, influential, hf_upvotes, github_stars
+                FROM paper_metrics WHERE COALESCE(citations, 0) + COALESCE(hf_upvotes, 0)
+                + COALESCE(github_stars, 0) > 0
+                AND uid IN (SELECT uid FROM papers WHERE pub_date >= date(?, '-180 day'))""", (day, day))
+
+    def metric_history(self, uid: str) -> list[dict]:
+        with self.session() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT day, citations, influential, hf_upvotes, github_stars FROM metric_history "
+                "WHERE uid=? ORDER BY day", (uid,))]
+
+    def metrics_for(self, uids: list[str]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        with self.session() as conn:
+            for i in range(0, len(uids), 900):
+                chunk = uids[i : i + 900]
+                q = f"SELECT * FROM paper_metrics WHERE uid IN ({','.join('?' * len(chunk))})"
+                out.update({r["uid"]: dict(r) for r in conn.execute(q, chunk)})
+        return out
 
     def log_fetch(self, source: str, day: str, reported: int | None, fetched: int) -> None:
         with self.session() as conn:
@@ -383,12 +548,16 @@ class Database:
     PAPER_COLUMNS = """p.uid, p.source, p.native_id, p.version, p.title, p.abstract, p.authors,
         p.n_authors, p.primary_category, p.categories, p.comment, p.journal_ref, p.doi,
         p.abs_url, p.pdf_url, p.published, p.pub_date, p.week, p.updated, p.withdrawn,
-        p.keyphrases, s.total, s.venue, s.artifacts, s.momentum, s.novelty, s.breadth, s.substance, s.team,
-        s.tags, s.details"""
+        p.keyphrases, s.total, s.coverage, s.citations, s.community, s.adoption, s.venue,
+        s.artifacts, s.momentum, s.novelty, s.breadth, s.substance, s.team, s.tags, s.details,
+        m.citations AS n_citations, m.influential AS n_influential, m.s2_venue, m.s2_venue_type,
+        m.max_h_index, m.hf_upvotes AS n_upvotes, m.hf_comments AS n_comments, m.github_repo,
+        m.github_stars AS n_stars"""
 
     def _select(self, where: str, params: tuple | dict = (), tail: str = "") -> list[dict]:
         sql = (
             f"SELECT {self.PAPER_COLUMNS} FROM papers p LEFT JOIN scores s ON s.uid = p.uid "
+            f"LEFT JOIN paper_metrics m ON m.uid = p.uid "
             f"WHERE {where} {tail}"
         )
         with self.session() as conn:

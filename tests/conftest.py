@@ -43,7 +43,7 @@ def make_papers(start: date, days: int, per_day: int = 30, seed: int = 1) -> lis
             ])
             cats = [cat] + rng.sample([c for c in TOPICS if c != cat], rng.randint(0, 2))
             papers.append(Paper(
-                source="fake",
+                source="arxiv",  # registered as "fake", but looks like arXiv data
                 native_id=f"{day:%y%m}.{serial:05d}",
                 title=f"On {a} for {b}",
                 abstract=FILLER.format(a=a, b=b),
@@ -83,6 +83,12 @@ def settings(tmp_path, monkeypatch) -> Settings:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("EMBEDDINGS", "hash")
     monkeypatch.setenv("SOURCES", "fake")
+    monkeypatch.setenv("ENRICHERS", "")  # no network in tests; enrichment tests mock HTTP
+    (tmp_path / "core_ranks.csv").write_text(
+        "1,Usenix Security Symposium,USENIX-Security,ICORE2026,A*,Yes\n"
+        "2,ACM Conference on Computer and Communications Security,CCS,ICORE2026,A*,Yes\n"
+        "3,IEEE International Conference on Communications,ICC,ICORE2026,B,Yes\n"
+        "4,Some Workshop Conference,SWC,ICORE2026,C,Yes\n")
     import cs_paper_radar.embed as embed
 
     monkeypatch.setattr(embed, "_EMBEDDER", None)

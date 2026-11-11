@@ -7,21 +7,30 @@
 <h2>Coverage</h2>
 <p>Every day the pipeline asks the <a href="https://info.arxiv.org/help/api/user-manual.html">arXiv API</a> for all papers first submitted in these categories (primary or cross-listed): <code>{{ settings.arxiv_categories|join(', ') }}</code>. The last {{ settings.update_lookback_days }} days are re-fetched on every run, because arXiv publishes a day's submissions only after its evening announcement and updates (new versions, acceptance notes) arrive later. Older days that are missing or were stored incompletely are repaired automatically.</p>
 
-<h2>The frontier score</h2>
-<p>arXiv does not publish citations, downloads or votes, so new papers are ranked with signals that can be computed from the paper itself and from the rest of the corpus. Every signal is in [0, 1]; the score is their weighted sum. Each paper page shows the value and the evidence for every signal.</p>
+<h2>The score</h2>
+<p>Each paper gets up to eight signals in [0, 1]; the score is their <b>weighted mean</b>. Every paper page shows the raw numbers, the signal values, and the evidence behind each one.</p>
 <table class="breakdown">
-<thead><tr><th>Signal</th><th>Weight</th><th>What it measures</th></tr></thead>
+<thead><tr><th>Signal</th><th>Weight</th><th>Source</th><th>What it measures</th></tr></thead>
 <tbody>
-<tr><td><i class="dot sig-venue"></i>Venue</td><td>{{ (weights.venue*100)|round|int }}%</td><td>The comment or journal reference says the paper was accepted at, or appears in, a recognised venue (NeurIPS, CCS, USENIX Security, SIGCOMM, OSDI, ICSE, STOC, ...). Workshops count less; "under review" counts little.</td></tr>
-<tr><td><i class="dot sig-artifacts"></i>Code/data</td><td>{{ (weights.artifacts*100)|round|int }}%</td><td>Code, data, models or a project page are released (GitHub, Hugging Face, Zenodo links, or an explicit statement). Promised releases count half.</td></tr>
-<tr><td><i class="dot sig-momentum"></i>Momentum</td><td>{{ (weights.momentum*100)|round|int }}%</td><td>How many papers of the same week sit close to this one in embedding space, compared with what the previous {{ settings.momentum_baseline_weeks }} weeks predict. A high value means its research direction is accelerating. Percentile within the week.</td></tr>
-<tr><td><i class="dot sig-novelty"></i>Novelty</td><td>{{ (weights.novelty*100)|round|int }}%</td><td>Distance to the closest paper published in the previous {{ settings.novelty_lookback_days }} days. Percentile within the week.</td></tr>
-<tr><td><i class="dot sig-breadth"></i>Breadth</td><td>{{ (weights.breadth*100)|round|int }}%</td><td>Cross-listed in several categories, especially across different research areas.</td></tr>
-<tr><td><i class="dot sig-substance"></i>Substance</td><td>{{ (weights.substance*100)|round|int }}%</td><td>A full paper (8+ pages, figures, journal version) rather than a short note.</td></tr>
-<tr><td><i class="dot sig-team"></i>Team</td><td>{{ (weights.team*100)|round|int }}%</td><td>Collaboration size, log-scaled and capped at 10 authors. Deliberately weak.</td></tr>
+<tr><td><i class="dot sig-citations"></i>Citations</td><td>{{ (weights.citations*100)|round|int }}%</td><td>Semantic Scholar</td><td>Citations plus twice the <em>influential</em> citations (citations that build on the work, not just mention it).</td></tr>
+<tr><td><i class="dot sig-community"></i>Upvotes</td><td>{{ (weights.community*100)|round|int }}%</td><td>Hugging Face daily papers</td><td>Community upvotes. Mostly covers ML, vision and NLP.</td></tr>
+<tr><td><i class="dot sig-adoption"></i>Code stars</td><td>{{ (weights.adoption*100)|round|int }}%</td><td>GitHub</td><td>Stars of the repository linked from the paper.</td></tr>
+<tr><td><i class="dot sig-venue"></i>Venue</td><td>{{ (weights.venue*100)|round|int }}%</td><td>Semantic Scholar, arXiv, CORE ranking</td><td>Where it is published, tiered by the CORE conference ranking (A* 1.0, A 0.85, B 0.65, C 0.45; journals by family). Verified venues count fully; "accepted at X" written by the authors counts 90%; workshops 60%; "under review" almost nothing.</td></tr>
+<tr><td><i class="dot sig-artifacts"></i>Code/data</td><td>{{ (weights.artifacts*100)|round|int }}%</td><td>the paper</td><td>Code, data, models or a project page are released.</td></tr>
+<tr><td><i class="dot sig-novelty"></i>Novelty</td><td>{{ (weights.novelty*100)|round|int }}%</td><td>embeddings</td><td>Distance to the closest paper of the previous {{ settings.novelty_lookback_days }} days.</td></tr>
+<tr><td><i class="dot sig-momentum"></i>Momentum</td><td>{{ (weights.momentum*100)|round|int }}%</td><td>embeddings</td><td>Growth of the paper's research neighbourhood this week versus the previous {{ settings.momentum_baseline_weeks }} weeks.</td></tr>
+<tr><td><i class="dot sig-substance"></i>Substance</td><td>{{ (weights.substance*100)|round|int }}%</td><td>the paper</td><td>Full paper (pages, figures, journal version) rather than a short note.</td></tr>
 </tbody>
 </table>
-<p>Momentum and novelty pull in opposite directions on purpose: one rewards joining a fast-moving direction, the other rewards leaving the crowd. The weekly top {{ settings.top_n }} takes at most {{ settings.top_max_per_category }} papers per primary category and skips near-duplicates, so one busy field cannot fill the list. Weights are configurable (<code>SCORE_WEIGHTS</code>), and citation counts or community votes can be added as further signals when more sources are connected.</p>
+<h3>Fairness rules</h3>
+<ul>
+<li><b>Same age, same field.</b> Citations, upvotes, stars, novelty and momentum are <em>percentiles within the paper's cohort</em>: papers of the same research area submitted in the same week. A theory paper is compared with theory papers of its week, never with ML papers that are cited ten times faster.</li>
+<li><b>Missing is not zero.</b> A signal is used for a cohort only if it carries information there (at least {{ (settings.signal_min_coverage*100)|round|int }}% of the cohort has a non-zero value). Otherwise it is dropped for the whole cohort and the other weights are rescaled. Each score shows how much of the weight was actually measured.</li>
+<li><b>Verified over claimed.</b> Venue from Semantic Scholar or a journal reference beats an acceptance note in the arXiv comment.</li>
+<li><b>No prestige shortcuts.</b> Author h-index, team size and number of cross-listed categories are shown for context but are not part of the score: they reward famous groups and are easy to game.</li>
+<li><b>Scores mature.</b> Evidence keeps arriving, so the last {{ settings.rescore_weeks }} weeks are re-scored on every update. Rankings of the current week are provisional; older weeks settle as citations accumulate.</li>
+</ul>
+<p>The weekly top {{ settings.top_n }} takes at most {{ settings.top_max_per_category }} papers per category and skips near-duplicates. Weights are configurable (<code>SCORE_WEIGHTS</code>).</p>
 
 <h2>Topics</h2>
 <p>A topic query is matched two ways: BM25 keyword search over titles and abstracts (the query words close together, falling back to all words anywhere), and semantic search with sentence embeddings (<code>{{ settings.embedding_model }}</code>, run locally). Results are fused by reciprocal rank. For the matching papers the radar shows:</p>
@@ -38,7 +47,7 @@
 
 <h2>Limits</h2>
 <ul>
-<li>The score estimates potential, not quality. It cannot read the paper; a brilliant single-author preprint with no code will rank lower than it deserves.</li>
+<li>The score combines measurable evidence; it does not read the paper. In the first days after submission there are few citations, so the newest week leans on venue, released artifacts, novelty and momentum.</li>
 <li>Venue detection relies on what authors write in the arXiv comment field.</li>
 <li>Days are UTC submission days, not arXiv announcement days.</li>
 </ul>

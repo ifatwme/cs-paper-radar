@@ -12,30 +12,54 @@ from cs_paper_radar.scoring import (
     venue_signal,
 )
 from cs_paper_radar.text import phrases
+from cs_paper_radar.venues import VenueRanker
+
+RANKER = VenueRanker([("Usenix Security Symposium", "USENIX-Security", "A*"),
+                      ("Neural Information Processing Systems", "NeurIPS", "A*"),
+                      ("International Conference on Learning Representations", "ICLR", "A*"),
+                      ("Computer Vision and Pattern Recognition", "CVPR", "A*"),
+                      ("IEEE International Conference on Communications", "ICC", "B")])
 
 
 @pytest.mark.parametrize(
-    "comment,journal,doi,low,high",
+    "comment,journal,s2,low,high",
     [
-        ("Accepted at USENIX Security 2026", "", "", 1.0, 1.0),
-        ("To appear in NeurIPS 2026 (spotlight)", "", "", 1.0, 1.0),
-        ("Accepted to the NeurIPS 2026 Workshop on Safety", "", "", 0.6, 0.6),
-        ("Under review at ICLR 2027", "", "", 0.1, 0.1),
-        ("Submitted to CCS", "", "", 0.1, 0.1),
-        ("", "IEEE Transactions on Information Forensics and Security 2026", "", 0.95, 0.95),
-        ("CVPR 2026", "", "", 0.6, 0.6),
+        ("To appear in NeurIPS 2026 (spotlight)", "", "", 0.9, 0.9),       # self-reported A*: 0.9
+        ("Accepted to the NeurIPS 2026 Workshop on Safety", "", "", 0.5, 0.6),
+        ("Under review at ICLR 2027", "", "", 0.05, 0.05),
+        ("Submitted to CCS", "", "", 0.05, 0.05),
+        ("", "IEEE Transactions on Information Forensics and Security 2026", "", 0.85, 0.85),
+        ("CVPR 2026", "", "", 0.5, 0.5),                                    # mentioned, not stated accepted
         ("12 pages, 4 figures", "", "", 0.0, 0.0),
-        ("", "", "10.1145/123", 0.6, 0.6),
+        ("", "", "Neural Information Processing Systems", 1.0, 1.0),       # verified A*
+        ("", "", "IEEE International Conference on Communications", 0.65, 0.65),
+        ("", "", "Proceedings of the AAAI Symposium Series", 0.3, 0.4),
     ],
 )
-def test_venue_signal(comment, journal, doi, low, high):
-    value, why = venue_signal(comment, journal, doi)
+def test_venue_signal(comment, journal, s2, low, high):
+    value, why = venue_signal(comment, journal, "", s2, "", RANKER)
     assert low <= value <= high, why
 
 
 def test_venue_needs_word_boundaries():
     # "ACL" must not match inside "ORACLE", "ATC" inside "BATCH".
     assert venue_signal("ORACLE BATCH processing notes", "", "")[0] == 0.0
+
+
+def test_github_repo_extraction():
+    from cs_paper_radar.enrich import extract_github_repo
+
+    assert extract_github_repo("Code: https://github.com/foo/bar-baz.") == "foo/bar-baz"
+    assert extract_github_repo("see github.com/foo/bar.git)") == "foo/bar"
+    assert extract_github_repo("https://github.com/features/copilot") is None
+    assert extract_github_repo("no link") is None
+
+
+def test_cohort_percentile_zero_means_no_evidence():
+    from cs_paper_radar.scoring import cohort_percentile
+
+    r = cohort_percentile(np.array([0, 0, 0, 1, 5]), zero_is_none=True)
+    assert list(r[:3]) == [0, 0, 0] and 0 < r[3] < r[4] == 1.0
 
 
 def test_artifacts_signal():

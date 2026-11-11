@@ -20,22 +20,29 @@ Source for now: the [arXiv API](https://info.arxiv.org/help/api/index.html), cat
 
 ## How ranking works
 
-arXiv provides no citations, downloads or votes, so new papers are ranked from signals computed from the
-paper and from the corpus. Each signal is in [0, 1]; the score is their weighted sum.
+The score is a weighted mean of up to eight signals, built to be **reliable, honest and fair**:
 
-| Signal | Default weight | Measures |
+| Signal | Weight | Source |
 |---|---|---|
-| Venue | 20% | "Accepted at / to appear in" a recognised venue (NeurIPS, CCS, USENIX Security, SIGCOMM, OSDI, ICSE, STOC, ...), journal ref, DOI. Workshops count less, "under review" little. |
-| Code/data | 15% | Released code, data, models or project page (GitHub/Hugging Face/Zenodo links or explicit statements). |
-| Momentum | 20% | Papers this week in the paper's embedding neighbourhood vs. the number expected from the previous 4 weeks — its direction is accelerating. Percentile within the week. |
-| Novelty | 20% | Distance to the closest paper of the previous 90 days. Percentile within the week. |
-| Breadth | 10% | Cross-listed across categories and research areas. |
-| Substance | 10% | Full paper (pages, figures, journal version) rather than a short note. |
-| Team | 5% | Collaboration size, log-scaled, capped. |
+| Citations (+2 × influential) | 20% | [Semantic Scholar](https://api.semanticscholar.org/) |
+| Community upvotes | 10% | [Hugging Face daily papers](https://huggingface.co/papers) |
+| Code adoption (stars) | 10% | GitHub |
+| Venue, CORE-tiered, verified > self-reported | 15% | Semantic Scholar, arXiv, [CORE ranking](https://portal.core.edu.au/conf-ranks/) |
+| Code/data released | 10% | the paper |
+| Novelty | 15% | local embeddings |
+| Momentum of its research direction | 15% | local embeddings |
+| Substance (full paper) | 5% | the paper |
 
-Weights are configurable with `SCORE_WEIGHTS=venue=0.3,novelty=0.25` (renormalised). The weekly list
-takes at most `TOP_MAX_PER_CATEGORY` (4) papers per primary category. Details:
-[docs/scoring.md](docs/scoring.md).
+- **Fair:** count and corpus signals are percentiles within the paper's *cohort* — same research
+  area, same week — so papers are never compared with older papers or with faster-citing fields.
+- **Honest:** a signal with no information for a cohort is marked *not measured* and the other weights
+  are rescaled; each score shows how much of the weight was measured, and each paper page shows the
+  raw numbers behind every signal.
+- **No prestige proxies:** author h-index, team size and cross-listing are shown but not scored.
+- **Maturing:** the last 13 weeks are re-scored daily as citations, upvotes and stars arrive.
+
+All sources are free and work without keys; `S2_API_KEY` and `GITHUB_TOKEN` only raise rate limits.
+Details: [docs/scoring.md](docs/scoring.md).
 
 ## Run it
 
@@ -50,7 +57,7 @@ docker compose up -d                              # http://127.0.0.1:8000
 docker compose run --rm job update                # what the daily timer runs
 ```
 
-Other jobs: `stats`, `top --week 2026-W46`, `topic "network security"`, `rescore --start 2026-10-01`.
+Other jobs: `enrich` (external evidence + re-score), `stats`, `top --week 2026-W46`, `topic "network security"`, `rescore --start 2026-10-01`.
 Without Docker: `pip install -r requirements.txt -e . && DATA_DIR=./data cs-paper-radar backfill --days 30 && cs-paper-radar serve`.
 
 ### Server deployment (what runs on the VPS)
@@ -88,6 +95,10 @@ All settings are environment variables (see `.env.example`):
 | `HEAL_WINDOW_DAYS` / `HEAL_MAX_DAYS` | `60` / `10` | how far back incomplete days are repaired, and how many per run |
 | `ARXIV_PAGE_SIZE` / `ARXIV_DELAY_S` | `1000` / `3.5` | request size and politeness delay (arXiv asks for ≥ 3 s) |
 | `NOVELTY_LOOKBACK_DAYS` / `MOMENTUM_BASELINE_WEEKS` | `90` / `4` | corpus-signal windows |
+| `ENRICHERS` | `semantic_scholar,huggingface,github` | external evidence sources |
+| `S2_API_KEY` / `GITHUB_TOKEN` | – | optional, raise rate limits |
+| `RESCORE_WEEKS` | `13` | weeks re-scored on every update |
+| `COHORT_MIN_SIZE` / `SIGNAL_MIN_COVERAGE` | `40` / `0.03` | fairness cohort size, minimum evidence share |
 
 ## API
 

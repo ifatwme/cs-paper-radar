@@ -31,6 +31,13 @@ x-env: &env
   HEAL_WINDOW_DAYS: ${HEAL_WINDOW_DAYS:-60}
   HEAL_MAX_DAYS: ${HEAL_MAX_DAYS:-10}
   SITE_NAME: ${SITE_NAME:-CS Paper Radar}
+  # external evidence (all free; keys optional, they only raise rate limits)
+  ENRICHERS: ${ENRICHERS:-semantic_scholar,huggingface,github}
+  S2_API_KEY: ${S2_API_KEY:-}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  ENRICH_BUDGET_S: ${ENRICH_BUDGET_S:-1200}
+  S2_MAX_BATCHES: ${S2_MAX_BATCHES:-40}
+  RESCORE_WEEKS: ${RESCORE_WEEKS:-13}
 
 services:
   app:

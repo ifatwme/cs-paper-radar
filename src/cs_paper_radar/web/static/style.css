@@ -352,3 +352,16 @@ tbody tr:hover { background: var(--hover); }
   .term-row { grid-template-columns: 1fr 80px 50px; }
   .foot-in { grid-template-columns: 1fr; }
 }
+
+/* v2 score evidence */
+.pop-row.off, .signal.off { opacity: .45; }
+.evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.evidence-grid div { display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; }
+.evidence-grid b { font-size: 1.25rem; }
+.evidence-grid span { font-size: .76rem; color: var(--muted); }
+.tag.t-top-venue, .tag.t-published { background: color-mix(in srgb, var(--venue) 14%, transparent); color: var(--venue); }
+.tag.t-highly-cited { background: color-mix(in srgb, var(--venue) 20%, transparent); color: var(--venue); }
+.tag.t-community-pick { background: color-mix(in srgb, var(--team) 14%, transparent); color: var(--team); }
+.tag.t-popular-code { background: color-mix(in srgb, var(--artifacts) 14%, transparent); color: var(--artifacts); }
+:root { --citations: #1d4ed8; --community: #db2777; --adoption: #059669; }
+.sig-citations { background: var(--citations); } .sig-community { background: var(--community); } .sig-adoption { background: var(--adoption); }

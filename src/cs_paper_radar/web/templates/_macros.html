@@ -1,14 +1,15 @@
 {% macro score_badge(p) -%}
 {% if p.total is not none %}
-<div class="score" tabindex="0" aria-label="Frontier score {{ '%.2f'|format(p.total) }}">
+{% set cov = p.coverage or 1 %}
+<div class="score" tabindex="0" aria-label="Score {{ '%.2f'|format(p.total) }}">
   <span class="score-num">{{ '%.2f'|format(p.total) }}</span>
-  <span class="sbar">{% for s in signals %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * (p[s] or 0) * 100)|round(1) }}%"></i>{% endfor %}</span>
+  <span class="sbar">{% for s in signals %}{% if p[s] is not none %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * p[s] / cov * 100)|round(1) }}%"></i>{% endif %}{% endfor %}</span>
   <div class="pop" role="tooltip">
-    <div class="pop-title">Frontier score {{ '%.2f'|format(p.total) }}</div>
+    <div class="pop-title">Score {{ '%.2f'|format(p.total) }} <span class="muted">· {{ (cov * 100)|round|int }}% of weight measured</span></div>
     {% for s in signals %}
-    <div class="pop-row"><i class="dot sig-{{ s }}"></i><span>{{ signal_labels[s] }}</span><span class="pop-bar"><b class="sig-{{ s }}" style="width:{{ ((p[s] or 0) * 100)|round }}%"></b></span><span class="num">{{ '%.2f'|format(p[s] or 0) }}</span></div>
+    <div class="pop-row{{ ' off' if p[s] is none }}"><i class="dot sig-{{ s }}"></i><span>{{ signal_labels[s] }}</span><span class="pop-bar"><b class="sig-{{ s }}" style="width:{{ ((p[s] or 0) * 100)|round }}%"></b></span><span class="num">{{ '%.2f'|format(p[s]) if p[s] is not none else '—' }}</span></div>
     {% endfor %}
-    <div class="pop-foot">Hover numbers are signal values (0–1); the bar shows weighted contributions.</div>
+    <div class="pop-foot">{% if p.n_citations %}{{ p.n_citations }} citations · {% endif %}{% if p.n_upvotes %}{{ p.n_upvotes }} upvotes · {% endif %}{% if p.n_stars %}{{ p.n_stars }} ★ · {% endif %}Values are percentiles within the paper's area and week; — = not measured.</div>
   </div>
 </div>
 {% endif %}
@@ -56,7 +57,7 @@
 {%- endmacro %}
 
 {% macro legend() -%}
-<div class="legend"><span class="muted">Score</span>{% for s in signals %}<span><i class="sig-{{ s }}"></i>{{ signal_labels[s] }} {{ (weights[s] * 100)|round|int }}%</span>{% endfor %}<a href="/about">how it works</a></div>
+<div class="legend"><span class="muted">Score = weighted mean of</span>{% for s in signals %}<span><i class="sig-{{ s }}"></i>{{ signal_labels[s] }} {{ (weights[s] * 100)|round|int }}%</span>{% endfor %}<a href="/about">how it works</a></div>
 {%- endmacro %}
 
 {% macro area_tabs(areas, base, current, total) -%}

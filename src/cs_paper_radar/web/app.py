@@ -34,12 +34,15 @@ log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
 
 SIGNAL_LABELS = {
+    "citations": "Citations",
+    "community": "Upvotes",
+    "adoption": "Code stars",
     "venue": "Venue",
     "artifacts": "Code/data",
-    "momentum": "Momentum",
     "novelty": "Novelty",
-    "breadth": "Breadth",
+    "momentum": "Momentum",
     "substance": "Substance",
+    "breadth": "Breadth",
     "team": "Team",
 }
 
@@ -233,7 +236,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         similar = db.get_papers([u for u, _ in sims])
         similar_list = decorate([{**similar[u], "similarity": s} for u, s in sims if u in similar])
         return render(request, "paper.html", p=p, similar=similar_list,
-                      related_terms=related_terms(p))
+                      related_terms=related_terms(p), history=db.metric_history(uid))
 
     def related_terms(p: dict, k: int = 10) -> list[str]:
         """Topic links for a paper: phrases from its title first (longest first),
@@ -306,7 +309,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "primary_category", "categories", "comment", "journal_ref", "doi", "abs_url",
             "pdf_url", "published", "pub_date", "week", "tags")}
         out["score"] = None if p.get("total") is None else {
-            "total": p["total"], **{s: p.get(s) for s in SIGNALS}, "evidence": p.get("details") or {}}
+            "total": p["total"], "coverage": p.get("coverage"),
+            "signals": {s: p.get(s) for s in SIGNALS}, "evidence": p.get("details") or {}}
+        out["metrics"] = {
+            "citations": p.get("n_citations"), "influential_citations": p.get("n_influential"),
+            "hf_upvotes": p.get("n_upvotes"), "github_repo": p.get("github_repo"),
+            "github_stars": p.get("n_stars"), "venue": p.get("s2_venue") or None,
+            "max_author_h_index": p.get("max_h_index"),
+        }
         return out
 
     @app.get("/api/stats", tags=["meta"])

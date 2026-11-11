@@ -1,63 +1,94 @@
-# Scoring details
+# Scoring (v2)
 
-Code: `src/cs_paper_radar/scoring.py`. Every paper of an ISO week is (re)scored whenever the week is
-touched by an update, so a paper's score can change while its week is open (new papers change the
-percentiles; authors add acceptance notes in new versions).
+Code: `src/cs_paper_radar/scoring.py`, external data: `src/cs_paper_radar/enrich/`,
+venue tiers: `src/cs_paper_radar/venues.py`.
 
-## Metadata signals
+## Goals
 
-**Venue** (comment + journal ref + DOI)
+1. **Reliable** — prefer measured evidence (citations, adoption, verified venues) over guesses.
+2. **Honest** — every number on the site traces back to a raw value and its source; signals that
+   could not be measured are shown as "not measured", never silently treated as zero or average.
+3. **Fair** — compare a paper only with papers of the same age and research area; leave out
+   prestige proxies.
+
+## Signals
+
+| Signal | Weight | Source | Raw value | Normalisation |
+|---|---|---|---|---|
+| citations | 20% | Semantic Scholar Graph API (batch, 500 papers/request) | citations + 2 × influential citations | cohort percentile, 0 citations → 0 |
+| community | 10% | Hugging Face `api/daily_papers` (last 30 days) | upvotes | cohort percentile, 0 → 0 |
+| adoption | 10% | GitHub REST `repos/{owner}/{repo}` | stars of the linked repository | cohort percentile, 0 → 0 |
+| venue | 15% | Semantic Scholar venue, arXiv journal ref, arXiv comment; CORE/ICORE ranking | tier | absolute (see below) |
+| artifacts | 10% | abstract + comment | code/data/model links or statements | absolute |
+| novelty | 15% | local embeddings | 1 − max cosine similarity to the previous 90 days | cohort percentile |
+| momentum | 15% | local embeddings | neighbourhood growth vs. previous 4 weeks | cohort percentile |
+| substance | 5% | comment | pages, figures, journal version | absolute |
+
+`total = Σ wᵢ·sᵢ / Σ wᵢ` over the signals measured for that paper. `coverage = Σ wᵢ` (measured
+share of the weight) is stored and shown next to every score.
+
+### Cohorts
+
+A cohort is (research area, ISO week). Areas: AI & ML, Language/Vision/Media, Security & Privacy,
+Systems & Networking, Software & Programming, Theory & Algorithms, Robotics/Control/Signals,
+People & Society (`taxonomy.AREAS`). A paper's area comes from its CS/EESS home category (its primary
+category, or its first CS/EESS cross-list when the primary is e.g. `math.OC`). Areas with fewer than
+`COHORT_MIN_SIZE` (40) papers in a week are pooled.
+
+Why: in a typical week a security paper with 3 citations can be in the top 5% of its cohort while an
+LLM paper needs 15. Raw counts would rank fields, not papers. Comparing within the same week removes
+the age advantage of older papers.
+
+### Missing is not zero
+
+For count signals, a cohort uses the signal only if at least `SIGNAL_MIN_COVERAGE` (3%) and at least
+3 of its papers have a non-zero value. Otherwise the signal is "not measured" for the whole cohort
+(for example Hugging Face upvotes for theory papers, or citations for a week-old cohort) and the
+remaining weights are renormalised. Inside a measured cohort, zero means "no evidence yet" and scores 0.
+
+Novelty/momentum are not measured until enough history exists (≥ 200 earlier papers / a 4-week baseline).
+
+### Venue tiers
 
 | Evidence | Value |
 |---|---|
-| journal ref present | 0.95 (0.7 for workshop) |
-| accepted/to appear/published + known venue | 1.0 (0.6 for workshop) |
-| "under review", "submitted to", "preprint" | 0.1 |
-| accepted wording without a known venue | 0.75 (0.5 for workshop) |
-| known venue mentioned, no acceptance wording | 0.6 (0.4 for workshop) |
-| DOI only | 0.6 |
+| Venue from Semantic Scholar or the arXiv journal ref, ranked by CORE | A* 1.0 · A 0.85 · B 0.65 · C 0.45 |
+| Journal families (IEEE/ACM Transactions, JMLR/TMLR, Nature/Science/PNAS, CACM, Proc. IEEE) | 0.85–1.0 |
+| Other journals / unranked published venues | 0.55–0.6 |
+| Workshop, companion, extended abstract, "Findings", symposium series | × 0.6 |
+| "Accepted at / to appear in X" in the arXiv comment (self-reported) | 0.9 × tier |
+| Venue named but acceptance not stated | 0.5 × tier |
+| "Under review", "submitted to" | 0.05 |
+| DOI only | 0.5 |
 
-The venue list covers the main ML/AI, vision, NLP/IR, security & cryptography, systems/networking/
-architecture/databases, software engineering & PL, theory, HCI, robotics/control and signal-processing
-venues and journals. Matches use word boundaries, so "ACL" does not match "ORACLE".
+CORE rankings come from the free CSV export of https://portal.core.edu.au/conf-ranks/ (ICORE2026,
+fallback CORE2023), cached in `DATA_DIR/core_ranks.csv` and refreshed every 30 days.
 
-**Code/data**: 1.0 for a GitHub/GitLab/Hugging Face/Zenodo/Kaggle/OSF/Figshare/Code Ocean link; 0.8 for
-an explicit availability statement; 0.6 for any other link; 0.5 for "will be released".
+### Not in the score (shown for context)
 
-**Breadth**: `0.7 · min(1, (categories − 1) / 3) + 0.3 · [categories span more than one area]`.
+* **Author h-index** (Semantic Scholar): rewards established groups regardless of the paper (Matthew
+  effect).
+* **Team size** and **number of cross-listed categories**: not related to quality and easy to game.
 
-**Substance**: 1.0 for ≥ 8 pages or a journal version, 0.65 for 4–7, 0.3 for < 4, 0.4 if unknown;
-+0.1 for ≥ 3 figures; ×0.7 for very short abstracts.
+## Freshness
 
-**Team**: `min(1, ln(1 + authors) / ln 11)`.
+| Data | Refresh |
+|---|---|
+| Semantic Scholar | papers ≤ 14 days old: daily · ≤ 120 days: weekly · older: monthly |
+| Hugging Face | the last 30 days of daily papers on every run |
+| GitHub stars | repos of papers ≤ 30 days old: every 2 days · ≤ 180 days: every 14 days |
+| Scores and weekly picks | the last 13 weeks (`RESCORE_WEEKS`) on every update |
 
-## Corpus signals (embeddings)
+Daily snapshots of citations, upvotes and stars are kept in `metric_history` (papers ≤ 180 days old).
+Rankings of recent weeks are therefore provisional and settle as evidence accumulates.
 
-Vectors: `sentence-transformers/all-MiniLM-L6-v2` (384-d) on title + abstract, computed locally.
+## Limits
 
-**Novelty**: for each paper, `1 − max cosine similarity` to any paper submitted in the previous 90 days
-(strictly earlier days), converted to a percentile within the week. Neutral (0.5) until at least 200
-historical papers exist.
-
-**Momentum**: a similarity threshold `t` is set at the 99.5th percentile of random cross-pair
-similarities (adapts to the model). For each paper, count same-week papers above `t` (`c_now`) and
-baseline papers from the previous 4 weeks above `t`, scaled to one week (`expected`). Raw momentum is
-`ln((c_now + 1) / (expected + 1)) · min(1, c_now / 3) + 0.05 · ln(1 + c_now)` — growth of the
-neighbourhood, damped for tiny neighbourhoods — converted to a percentile within the week.
-
-## Total and selection
-
-`total = Σ weight_s · signal_s` (weights sum to 1). The weekly list is the greedy top N by total with
-at most 4 papers per primary category and no pair with cosine similarity above 0.93. The top 50 are
-stored in `weekly_picks`; the page and API can return up to 200 by recomputing from scores.
-
-## Tags
-
-`accepted`, `code/data`, `hot direction` (momentum ≥ 0.95 and ≥ 5 close papers), `unusual`
-(novelty ≥ 0.97), and text-pattern tags `survey`, `benchmark`, `dataset`, `position`, `theory`.
-
-## Known limits
-
-The score estimates attention-worthiness from observable signals; it does not read the paper. Venue
-detection depends on what authors write in the arXiv comment. Planned additional signals: citation
-velocity (Semantic Scholar), community votes (Hugging Face Papers).
+* Citations take weeks to appear; the current week is ranked mainly on venue, artifacts, novelty,
+  momentum and (for ML) upvotes.
+* Hugging Face upvotes reflect one community (ML); cohort normalisation keeps this from leaking into
+  other areas, but within ML it still favours papers that are promoted there.
+* GitHub stars can be bought or inflated by social media; they are one 10% signal and are
+  cohort-normalised.
+* Rate limits without keys: Semantic Scholar shared pool (~1 request/s), GitHub 60 requests/hour.
+  Set `S2_API_KEY` / `GITHUB_TOKEN` to raise them.

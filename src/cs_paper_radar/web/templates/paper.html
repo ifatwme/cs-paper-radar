@@ -31,13 +31,21 @@
   </article>
 
   <aside class="panel score-panel">
+    <div class="evidence-grid">
+      <div><b>{{ p.n_citations if p.n_citations is not none else '—' }}</b><span>citations{% if p.n_influential %} ({{ p.n_influential }} influential){% endif %}</span></div>
+      <div><b>{{ p.n_upvotes if p.n_upvotes is not none else '—' }}</b><span>HF upvotes</span></div>
+      <div><b>{{ p.n_stars if p.n_stars is not none else '—' }}</b><span>{% if p.github_repo %}<a href="https://github.com/{{ p.github_repo }}" target="_blank" rel="noopener">GitHub stars</a>{% else %}GitHub stars{% endif %}</span></div>
+      <div><b>{{ p.max_h_index if p.max_h_index is not none else '—' }}</b><span>max author h-index <span class="muted">(info, not scored)</span></span></div>
+    </div>
+    {% if history|length > 1 %}<p class="muted small">Tracked since {{ history[0].day }}: {{ history[0].citations or 0 }} → {{ history[-1].citations or 0 }} citations.</p>{% endif %}
     {% if p.total is not none %}
-    <div class="score-big"><b>{{ '%.2f'|format(p.total) }}</b><span class="muted">frontier score</span></div>
-    <span class="sbar big">{% for s in signals %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * (p[s] or 0) * 100)|round(1) }}%"></i>{% endfor %}</span>
+    {% set cov = p.coverage or 1 %}
+    <div class="score-big"><b>{{ '%.2f'|format(p.total) }}</b><span class="muted">score · {{ (cov * 100)|round|int }}% of weight measured</span></div>
+    <span class="sbar big">{% for s in signals %}{% if p[s] is not none %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * p[s] / cov * 100)|round(1) }}%"></i>{% endif %}{% endfor %}</span>
     <div class="signals">
     {% for s in signals %}
-      <div class="signal">
-        <div class="row between"><span><i class="dot sig-{{ s }}"></i>{{ signal_labels[s] }} <span class="muted small">× {{ (weights[s] * 100)|round|int }}%</span></span><b>{{ '%.2f'|format(p[s] or 0) }}</b></div>
+      <div class="signal{{ ' off' if p[s] is none }}">
+        <div class="row between"><span><i class="dot sig-{{ s }}"></i>{{ signal_labels[s] }} <span class="muted small">× {{ (weights[s] * 100)|round|int }}%</span></span><b>{{ '%.2f'|format(p[s]) if p[s] is not none else 'not measured' }}</b></div>
         <span class="pop-bar wide"><b class="sig-{{ s }}" style="width:{{ ((p[s] or 0) * 100)|round }}%"></b></span>
         {% set ev = (p.details or {}).get(s, '') %}{% if ev %}<div class="muted small evidence">{{ ev }}</div>{% endif %}
       </div>

@@ -25,9 +25,11 @@ def test_pipeline_populates_everything(populated):
     from collections import Counter
 
     assert max(Counter(p["primary_category"] for p in picks).values()) <= populated.top_max_per_category
-    # corpus signals were computed (not the neutral fallback) once history exists
-    assert any(p["novelty"] != 0.5 for p in picks)
-    assert any(p["momentum"] != 0.5 for p in picks)
+    # corpus signals were computed once history exists
+    assert all(p["novelty"] is not None and p["momentum"] is not None for p in picks)
+    # without enrichment, external signals are "not measured", not zero
+    assert all(p["citations"] is None and p["community"] is None for p in picks)
+    assert all(0 < p["coverage"] < 1 for p in picks)
 
 
 def test_upsert_is_idempotent(populated):
@@ -66,6 +68,8 @@ def test_web_pages_and_api(populated):
     assert client.get(f"/paper/{uid}").status_code == 200
     detail = client.get(f"/api/papers/{uid}").json()
     assert detail["score"]["total"] == week["papers"][0]["score"]["total"]
+    assert set(detail["score"]["signals"]) >= {"citations", "venue", "novelty"}
+    assert "github_stars" in detail["metrics"]
     assert len(detail["similar"]) > 0
 
     daily = client.get("/api/daily", params={"date": START.isoformat(), "cat": "cs.CR"}).json()
@@ -96,3 +100,53 @@ def test_heal_refetches_missing_and_partial_days(populated):
     assert gap in out["days"] and partial in out["days"]
     assert out["inserted"] == 30
     assert db.incomplete_days("fake", START.isoformat(), (START + timedelta(days=DAYS - 1)).isoformat()) == []
+
+
+def test_enrichment_feeds_cohort_normalised_signals(populated, monkeypatch):
+    """Mocked Semantic Scholar / Hugging Face / GitHub responses flow into the
+    scores; zero citations mean 'no evidence' (0), missing papers stay unmeasured."""
+    from cs_paper_radar import enrich, pipeline
+    from cs_paper_radar.enrich.http import PoliteClient
+
+    db = Database(populated.db_path)
+    last = START + timedelta(days=DAYS - 1)
+    week = iso_week(last)
+    papers = db.papers_between((last - timedelta(days=6)).isoformat(), last.isoformat())
+    cited = {p["native_id"]: i % 4 for i, p in enumerate(papers)}  # 0..3 citations
+    first = papers[0]["native_id"]
+
+    def fake_request(self, method, url, params=None, body=None, headers=None):
+        if "semanticscholar" in url:
+            return [{"paperId": f"s2-{i}", "citationCount": cited.get(i.split(":")[1], 0),
+                     "influentialCitationCount": 0, "venue": "", "publicationVenue": None,
+                     "journal": None, "authors": [{"hIndex": 7}]}
+                    if i.split(":")[1] in cited else None for i in body["ids"]]
+        if "huggingface" in url:
+            if params["date"] == last.isoformat() and params["p"] == 0:
+                return [{"paper": {"id": first, "upvotes": 42}, "numComments": 3}]
+            return []
+        if "api.github.com" in url:
+            return {"stargazers_count": 250}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(PoliteClient, "request", fake_request)
+    monkeypatch.setattr(PoliteClient, "_wait", lambda self, host: None)
+    monkeypatch.setenv("ENRICHERS", "semantic_scholar,huggingface,github")
+    monkeypatch.setenv("HF_DAYS", "3")
+    from cs_paper_radar.config import Settings
+
+    settings = Settings()
+    out = enrich.run_enrichment(settings, db, today=last + timedelta(days=2))
+    assert out["semantic_scholar"]["found"] >= len(papers)
+    assert out["huggingface"]["matched"] == 1
+    pipeline.score(settings, db, [week])
+
+    scored = {p["native_id"]: p for p in db.papers_between((last - timedelta(days=6)).isoformat(), last.isoformat())}
+    zero = [p for nid, p in scored.items() if cited[nid] == 0]
+    three = [p for nid, p in scored.items() if cited[nid] == 3]
+    assert all(p["citations"] == 0 for p in zero)
+    assert min(p["citations"] for p in three) > max(p["citations"] for p in zero)
+    assert scored[first]["n_upvotes"] == 42 and scored[first]["max_h_index"] == 7
+    # upvotes exist for 1 paper only -> below the coverage threshold -> not measured
+    assert scored[first]["community"] is None
+    assert all(p["coverage"] > 0.5 for p in scored.values())
