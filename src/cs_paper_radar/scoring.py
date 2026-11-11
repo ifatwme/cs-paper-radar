@@ -484,6 +484,8 @@ def area_quotas(sizes: dict[str, int], n: int, min_size: int = 20) -> dict[str, 
     """Split n slots across areas in proportion to their number of papers
     (largest-remainder method), at least one slot per area with >= min_size papers."""
     eligible = {a: c for a, c in sizes.items() if c >= min_size} or dict(sizes)
+    if not eligible or n <= 0:
+        return {}
     total = sum(eligible.values()) or 1
     raw = {a: n * c / total for a, c in eligible.items()}
     q = {a: max(1, math.floor(r)) for a, r in raw.items()}
@@ -560,6 +562,8 @@ def select_weekly(settings: Settings, papers: list[dict], scores: dict[str, floa
     """The weekly top-N. Default (TOP_SELECTION=proportional): each research area gets
     slots in proportion to its share of the week's papers, filled by score."""
     proportional = settings.top_selection == "proportional" if proportional is None else proportional
+    if not papers or n <= 0:
+        return []
     ranked = sorted((dict(p, total=scores[p["uid"]]) for p in papers if p["uid"] in scores),
                     key=lambda r: r["total"], reverse=True)
     home = {p["uid"]: home_category(p["primary_category"], p["categories"]) for p in papers}

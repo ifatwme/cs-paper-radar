@@ -12,8 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -39,17 +39,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build image
         run: docker build -f docker/app.Dockerfile -t cs-paper-radar:ci .
       - name: Smoke test (keyword-only mode, synthetic empty DB)
         run: |
           docker run -d --name radar -e EMBEDDINGS=off -p 8000:8000 cs-paper-radar:ci
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/healthz && break; sleep 1; done
-          curl -fsS http://127.0.0.1:8000/ > /dev/null
-          curl -fsS http://127.0.0.1:8000/api/stats
+          for p in / /weekly /daily /about /categories "/topic?q=security" /api/stats /api/weekly; do
+            curl -fsS -o /dev/null "http://127.0.0.1:8000$p" || { echo "FAILED: $p"; docker logs radar | tail -40; exit 1; }
+          done
           docker run --rm --entrypoint cs-paper-radar cs-paper-radar:ci --help
       - name: Compose files are valid
         run: |
           docker compose config -q
-          TLS_DIR=/tmp docker compose -f docker-compose.yml -f deploy/compose.server.yml config -q
+          TLS_DIR=/tmp HTTPS_PORT=8443 docker compose -f docker-compose.yml -f deploy/compose.server.yml config -q
+          bash -n scripts/renew_cert.sh

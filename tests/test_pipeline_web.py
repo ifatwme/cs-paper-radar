@@ -161,3 +161,13 @@ def test_enrichment_feeds_cohort_normalised_signals(populated, monkeypatch):
     # upvotes exist for 1 paper only -> below the coverage threshold -> not measured
     assert scored[first]["community"] is None
     assert all(p["coverage"] > 0.5 for p in scored.values())
+
+
+def test_web_works_on_an_empty_database(settings):
+    """Fresh install before the first pipeline run (what the CI smoke test does)."""
+    from cs_paper_radar.web.app import create_app
+
+    client = TestClient(create_app(settings))
+    for path in ["/", "/daily", "/weekly", "/categories", "/about", "/topic?q=security",
+                 "/api/stats", "/api/weekly", "/api/daily", "/api/fairness", "/feed/weekly.xml"]:
+        assert client.get(path).status_code == 200, path

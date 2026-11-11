@@ -140,6 +140,7 @@ def test_venue_ranker_titles_and_false_friends():
 def test_area_quotas_proportional_with_floor():
     from cs_paper_radar.scoring import area_quotas
 
+    assert area_quotas({}, 20) == {}
     q = area_quotas({"ai": 700, "media": 500, "theory": 120, "security": 80, "tiny": 5}, 20)
     assert sum(q.values()) == 20 and "tiny" not in q
     assert q["ai"] > q["media"] > q["theory"] >= q["security"] >= 1
