@@ -89,6 +89,8 @@ def test_web_pages_and_api(populated):
     assert client.get("/api/search", params={"q": "botnet", "days": 60}).json()["results"]
     assert client.get("/weekly?week=2026-W99x").status_code in (400, 422)
     assert client.get("/paper/arxiv:nope").status_code == 404
+    assert client.get("/api/topic", params={"q": "x" * 201}).status_code == 422  # input bounded
+    assert "Disallow: /api/" in client.get("/robots.txt").text
     assert client.get("/api/papers/arxiv:nope").status_code == 404
 
 

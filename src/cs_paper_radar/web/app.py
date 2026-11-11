@@ -85,7 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     env = templates.env
     # Content hash for cache-busting static assets (nginx caches /static for days).
     asset_version = hashlib.sha1(
-        b"".join((HERE / "static" / f).read_bytes() for f in ("style.css", "app.js"))
+        b"".join((HERE / "static" / f).read_bytes() for f in ("style.css", "app.js", "theme.js"))
     ).hexdigest()[:10]
     env.globals.update(
         asset_version=asset_version,
@@ -230,7 +230,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/topic", response_class=HTMLResponse, include_in_schema=False)
-    def topic(request: Request, q: str = "", days: int = Query(30, ge=7, le=180)):
+    def topic(request: Request, q: str = Query("", max_length=200), days: int = Query(30, ge=7, le=180)):
         report = engine.report(q.strip(), days=days) if q.strip() else None
         if report:
             decorate([h["paper"] for h in report["new"] + report["frontier"]])
@@ -288,6 +288,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                          "last7": now, "avg_prev4": round(before, 1),
                          "growth": round(math.log((now + 1) / (before + 1)), 3)})
         return rows
+
+    @app.get("/robots.txt", response_class=PlainTextResponse, include_in_schema=False)
+    def robots() -> str:
+        # Listings and paper pages are fine to crawl; topic analysis and the API are
+        # expensive and change constantly.
+        return "User-agent: *\nDisallow: /topic\nDisallow: /api/\nCrawl-delay: 5\n"
 
     @app.get("/about", response_class=HTMLResponse, include_in_schema=False)
     def about(request: Request):
@@ -351,7 +357,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"week": week, "n": len(papers), "papers": [slim(p) for p in papers]}
 
     @app.get("/api/topic", tags=["topics"])
-    def api_topic(q: str = Query(..., min_length=2), days: int = Query(30, ge=7, le=180),
+    def api_topic(q: str = Query(..., min_length=2, max_length=200), days: int = Query(30, ge=7, le=180),
                   n: int = Query(0, ge=0, le=100)):
         rep = engine.report(q, days=days, n=n or None)
 
@@ -366,7 +372,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return rep
 
     @app.get("/api/search", tags=["topics"])
-    def api_search(q: str = Query(..., min_length=2), days: int = Query(30, ge=1, le=400),
+    def api_search(q: str = Query(..., min_length=2, max_length=200), days: int = Query(30, ge=1, le=400),
                    limit: int = Query(50, ge=1, le=500)):
         end = latest_date()
         start = (date.fromisoformat(end) - timedelta(days=days - 1)).isoformat()

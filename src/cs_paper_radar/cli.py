@@ -114,7 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
 
         uvicorn.run("cs_paper_radar.web.app:create_app", factory=True, host=args.host,
-                    port=args.port, proxy_headers=True, forwarded_allow_ips="*")
+                    port=args.port, proxy_headers=True, forwarded_allow_ips="*",
+                    limit_concurrency=64, timeout_keep_alive=5, server_header=False)
     return 0
 
 
