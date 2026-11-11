@@ -30,7 +30,7 @@ import numpy as np
 
 from .config import Settings
 from .db import Database, week_bounds
-from .taxonomy import area_of
+from .taxonomy import CATEGORY_NAMES, area_of, home_category
 
 log = logging.getLogger(__name__)
 
@@ -176,7 +176,9 @@ def team_signal(n_authors: int) -> tuple[float, str]:
 
 
 _TAG_RULES = [
-    ("survey", re.compile(r"\b(survey|systematization of knowledge|SoK|a review of|overview of)\b", re.I)),
+    ("survey", re.compile(r"\b(a (comprehensive |systematic |brief )?survey|survey (of|on)|this survey|we survey|"
+                          r"systematization of knowledge|SoK|systematic (literature )?review|"
+                          r"a review of|overview of)\b", re.I)),
     ("benchmark", re.compile(r"\b(benchmark|leaderboard)\b", re.I)),
     ("dataset", re.compile(r"\b(we (release|introduce|present|collect|construct) [^.]{0,40}dataset|new dataset)\b", re.I)),
     ("position", re.compile(r"\bposition paper\b|\bwe argue\b", re.I)),
@@ -246,7 +248,7 @@ def _count_above(x: np.ndarray, pool: np.ndarray, thr: float, chunk: int = 2048)
     return counts
 
 
-def neighbour_threshold(x: np.ndarray, pool: np.ndarray, quantile: float = 0.998,
+def neighbour_threshold(x: np.ndarray, pool: np.ndarray, quantile: float = 0.995,
                         sample: int = 1500, seed: int = 0) -> float:
     """Similarity above which two papers count as 'same research direction':
     a high quantile of random cross-pair similarities (adapts to the model)."""
@@ -353,9 +355,12 @@ def score_week(settings: Settings, db: Database, model: str | None, week: str) -
         rows.append({"uid": p["uid"], "total": round(total, 4), **signals,
                      "tags": tags, "details": details})
     db.save_scores(rows)
+    primary = {p["uid"]: p["primary_category"] for p in papers}
+    eligible = [r for r in rows
+                if not settings.top_cs_primary_only or primary[r["uid"]] in CATEGORY_NAMES]
     picks = select_top(
-        sorted(rows, key=lambda r: r["total"], reverse=True),
-        {p["uid"]: p["primary_category"] for p in papers},
+        sorted(eligible, key=lambda r: r["total"], reverse=True),
+        {p["uid"]: home_category(p["primary_category"], p["categories"]) for p in papers},
         n=max(settings.top_n, 50),
         max_per_category=settings.top_max_per_category,
         vectors=_vectors_for(db, model, week) if model else None,

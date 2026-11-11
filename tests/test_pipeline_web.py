@@ -77,3 +77,22 @@ def test_web_pages_and_api(populated):
     assert client.get("/weekly?week=2026-W99x").status_code in (400, 422)
     assert client.get("/paper/arxiv:nope").status_code == 404
     assert client.get("/api/papers/arxiv:nope").status_code == 404
+
+
+def test_heal_refetches_missing_and_partial_days(populated):
+    from cs_paper_radar import pipeline
+
+    db = Database(populated.db_path)
+    gap = (START + timedelta(days=10)).isoformat()
+    partial = (START + timedelta(days=12)).isoformat()
+    with db.session() as conn:
+        conn.execute("DELETE FROM papers WHERE pub_date = ?", (gap,))
+        conn.execute("DELETE FROM fetch_log WHERE day = ?", (gap,))
+        # simulate a run that stored 5 of 30 papers
+        conn.execute("UPDATE fetch_log SET reported = 30, fetched = 5 WHERE day = ?", (partial,))
+    assert set(db.incomplete_days("fake", START.isoformat(), (START + timedelta(days=DAYS - 1)).isoformat())) == {gap, partial}
+
+    out = pipeline.heal(populated, db, START + timedelta(days=DAYS))
+    assert gap in out["days"] and partial in out["days"]
+    assert out["inserted"] == 30
+    assert db.incomplete_days("fake", START.isoformat(), (START + timedelta(days=DAYS - 1)).isoformat()) == []

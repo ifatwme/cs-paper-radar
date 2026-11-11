@@ -1,67 +1,107 @@
 {% extends "base.html" %}
-{% from "_macros.html" import paper_card, legend %}
+{% from "_macros.html" import paper_card, legend, preset_chips %}
 {% block title %}{{ q or 'Topics' }} · {{ site_name }}{% endblock %}
 {% block content %}
-<h1>{% if q %}Topic: {{ q }}{% else %}Explore a research topic{% endif %}</h1>
-<form class="filters big" method="get" action="/topic">
-  <input type="search" name="q" value="{{ q }}" placeholder="e.g. network security, LLM agents, compilers" autofocus>
-  <label>Window <select name="days">{% for d in [7, 14, 30, 60, 90] %}<option value="{{ d }}" {{ 'selected' if d == days }}>last {{ d }} days</option>{% endfor %}</select></label>
-  <button>Explore</button>
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Topic briefing</p>
+    <h1>{% if q %}{{ q }}{% else %}Explore a research topic{% endif %}</h1>
+  </div>
+</div>
+<form class="topic-form" method="get" action="/topic" data-loading>
+  <input type="search" name="q" value="{{ q }}" placeholder="e.g. network security, LLM agents, compilers" {{ 'autofocus' if not q }} aria-label="Topic">
+  <select name="days" aria-label="Window">{% for d in [7, 14, 30, 60, 90] %}<option value="{{ d }}" {{ 'selected' if d == days }}>last {{ d }} days</option>{% endfor %}</select>
+  <button>Analyse</button>
 </form>
+<div class="loading" hidden><span class="spinner"></span> Reading the literature… matching by keywords and meaning, clustering, ranking.</div>
+
 {% if not q %}
-  <p class="muted">Type any topic. Papers are matched by keywords <em>and</em> by meaning (sentence embeddings), then summarised as: what's new, the frontier (highest-scoring papers), emerging terms, research directions, and the topic's share of all CS papers over time.</p>
-  <div class="chips">{% for t in presets %}<a class="chip" href="/topic?q={{ quote(t) }}">{{ t }}</a>{% endfor %}</div>
+  <p class="muted lead-sm">Type any topic. Papers are matched by keywords <em>and</em> by meaning (local sentence embeddings), then summarised as <b>what's new</b>, the <b>frontier</b> (highest-scoring papers), <b>emerging terms</b>, <b>research directions</b> and the topic's <b>trend</b>.</p>
+  {{ preset_chips() }}
 {% elif report %}
   {% set r = report %}
-  <div class="grid3">
-    <div class="card"><div class="muted small">Papers in the last {{ r.days }} days</div><div class="big">{{ r.matched_window }}</div><div class="muted small">{{ r.window_start }} → {{ r.end }}</div></div>
-    <div class="card"><div class="muted small">New in the last {{ r.new_days }} days</div><div class="big">{{ r.matched_new }}</div></div>
-    <div class="card"><div class="muted small">Share of all CS/CE papers per week</div>
-      <svg viewBox="0 0 220 40" preserveAspectRatio="none"><polyline points="{{ r.trend|map(attribute='share')|list|sparkline }}"/></svg>
-      <div class="row small muted"><span>{{ r.trend[0].week_start if r.trend }}</span><span>{{ '%.2f'|format((r.trend[-1].share if r.trend else 0) * 100) }}% latest week</span></div>
+  <nav class="jump">
+    <a href="#overview">Overview</a>{% if r.emerging.terms %}<a href="#emerging">Emerging terms</a>{% endif %}{% if r.subtopics %}<a href="#directions">Directions</a>{% endif %}<a href="#frontier">Frontier</a><a href="#new">What's new</a>{% if r.categories %}<a href="#where">Where it's published</a>{% endif %}
+  </nav>
+
+  <section id="overview" class="overview">
+    <div class="stat"><span class="kpi-label">Last {{ r.days }} days</span><b>{{ r.matched_window }}</b><span class="kpi-sub">matching papers</span></div>
+    <div class="stat"><span class="kpi-label">Last {{ r.new_days }} days</span><b>{{ r.matched_new }}</b><span class="kpi-sub">new papers</span></div>
+    {% set tmax = (r.trend|map(attribute='n')|max) or 1 %}
+    {% set first = r.trend[:4]|sum(attribute='share') / 4 if r.trend|length >= 8 else 0 %}
+    {% set lastw = r.trend[-5:-1]|sum(attribute='share') / 4 if r.trend|length >= 8 else 0 %}
+    <div class="stat wide">
+      <span class="kpi-label">Papers per week · share of all CS/CE{% if first and lastw %} · <span class="{{ 'up' if lastw > first * 1.1 else ('down' if lastw < first * 0.9 else '') }}">{{ '%+.0f'|format((lastw / first - 1) * 100) }}% share vs. 3 months ago</span>{% endif %}</span>
+      <div class="trend" role="img" aria-label="Weekly trend">
+        {% for w in r.trend %}<div class="tcol" title="week of {{ w.week_start }}: {{ w.n }} papers ({{ '%.2f'|format(w.share * 100) }}% of {{ w.total }})"><i style="height:{{ (w.n / tmax * 100)|round }}%"></i></div>{% endfor %}
+      </div>
+      <div class="row between small muted"><span>{{ r.trend[0].week_start if r.trend }}</span><span>{{ '%.2f'|format((r.trend[-1].share if r.trend else 0) * 100) }}% of papers this week</span></div>
     </div>
-  </div>
+  </section>
   {% if not r.semantic %}<p class="note">Semantic matching is off on this server; results use keywords only.</p>{% endif %}
+  {% if r.matched_window == 0 %}<div class="empty">No papers matched “{{ q }}” in the last {{ r.days }} days. Try a broader phrase or a longer window.</div>{% endif %}
 
   {% if r.emerging.terms %}
-  <section>
-    <h2>{{ 'Emerging terms' if r.emerging.mode == 'emerging' else 'Characteristic terms' }}</h2>
-    <p class="muted small">{% if r.emerging.mode == 'emerging' %}Phrases over-represented in this topic's last {{ r.days }} days compared with its previous {{ r.days * 3 }} days (log-odds z-score). Numbers: papers now / before.{% else %}Not enough history yet to measure change; most frequent phrases instead.{% endif %}</p>
-    <div class="chips">{% for t in r.emerging.terms %}<a class="chip term" href="/topic?q={{ quote(q ~ ' ' ~ t.term) }}&days={{ days }}">{{ t.term }} <span class="muted">{{ t.recent }}{% if r.emerging.mode == 'emerging' %}/{{ t.past }}{% endif %}</span></a>{% endfor %}</div>
+  <section id="emerging">
+    <div class="section-head"><div>
+      <h2>{{ 'Emerging terms' if r.emerging.mode == 'emerging' else 'Characteristic terms' }}</h2>
+      <p class="muted small">{% if r.emerging.mode == 'emerging' %}Phrases whose share of this topic's papers rose most in the last {{ r.days }} days compared with the {{ r.days * 3 }} days before. Click to drill down.{% else %}Not enough history yet to measure change; the most frequent phrases instead.{% endif %}</p>
+    </div></div>
+    <div class="terms">
+    {% set smax = (r.emerging.terms|map(attribute='recent_share')|max) or 1 %}
+    {% for t in r.emerging.terms %}
+      <a class="term-row" href="/topic?q={{ quote(t.term) }}&days={{ days }}" title="{{ t.recent }} papers now ({{ t.recent_share|pct }}) vs {{ t.past }} before ({{ t.past_share|pct }})">
+        <span class="term">{{ t.term }}</span>
+        <span class="term-bars"><i class="now" style="width:{{ (t.recent_share / smax * 100)|round }}%"></i>{% if r.emerging.mode == 'emerging' %}<i class="before" style="width:{{ (t.past_share / smax * 100)|round }}%"></i>{% endif %}</span>
+        <span class="num">{{ t.recent }}{% if r.emerging.mode == 'emerging' %}<span class="muted"> / {{ t.past }}</span>{% endif %}</span>
+      </a>
+    {% endfor %}
+    </div>
+    {% if r.emerging.mode == 'emerging' %}<div class="legend small"><span><i class="now-sw"></i>share now</span><span><i class="before-sw"></i>share before</span></div>{% endif %}
   </section>
   {% endif %}
 
   {% if r.subtopics %}
-  <section>
-    <h2>Research directions</h2>
-    <p class="muted small">The topic's recent papers clustered by meaning; labels are each cluster's most distinctive phrases. Momentum = average neighbourhood growth of its papers.</p>
+  <section id="directions">
+    <div class="section-head"><div>
+      <h2>Research directions</h2>
+      <p class="muted small">This topic's recent papers clustered by meaning. Labels are each cluster's most distinctive phrases; momentum is how fast its neighbourhood is growing.</p>
+    </div></div>
     <div class="clusters">
+    {% set cmax = (r.subtopics|map(attribute='size')|max) or 1 %}
     {% for c in r.subtopics %}
-      <div class="card cluster">
-        <div class="row between"><b>{{ c.label }}</b><span class="muted small">{{ c.size }} papers · momentum {{ c.momentum|pct }}</span></div>
-        <ul>{% for p in c.papers %}<li><a href="/paper/{{ p.uid }}">{{ p.title }}</a></li>{% endfor %}</ul>
+      <div class="cluster">
+        <div class="cluster-head"><b>{{ c.label }}</b></div>
+        <div class="cluster-meta"><span>{{ c.size }} papers</span><span class="meter" title="momentum {{ c.momentum|pct }}"><i style="width:{{ (c.momentum * 100)|round }}%"></i></span><span class="muted">momentum {{ c.momentum|pct }}</span></div>
+        <ol>{% for p in c.papers %}<li><a href="/paper/{{ p.uid }}">{{ p.title }}</a></li>{% endfor %}</ol>
       </div>
     {% endfor %}
     </div>
   </section>
   {% endif %}
 
-  <section>
-    <h2>Frontier — top {{ r.frontier|length }} in the last {{ r.days }} days</h2>
+  <section id="frontier">
+    <div class="section-head"><div>
+      <h2>Frontier</h2>
+      <p class="muted small">The {{ r.frontier|length }} highest-scoring matching papers of the last {{ r.days }} days (score nudged by relevance; near-duplicates removed).</p>
+    </div></div>
     {{ legend() }}
-    {% for h in r.frontier %}{{ paper_card(h.paper, rank=loop.index, extra='relevance ' ~ (h.relevance|pct) ~ (' · keyword match' if h.keyword else '')) }}{% else %}<p class="muted">No papers matched.</p>{% endfor %}
+    <div class="list">{% for h in r.frontier %}{{ paper_card(h.paper, rank=loop.index, extra='relevance ' ~ (h.relevance|pct) ~ (' · keyword match' if h.keyword else ' · semantic match')) }}{% else %}<div class="empty">No papers matched.</div>{% endfor %}</div>
   </section>
 
-  <section>
-    <h2>What's new — last {{ r.new_days }} days</h2>
-    {% for h in r.new %}{{ paper_card(h.paper) }}{% else %}<p class="muted">Nothing new in the last {{ r.new_days }} days.</p>{% endfor %}
+  <section id="new">
+    <div class="section-head"><div>
+      <h2>What's new</h2>
+      <p class="muted small">Most recent matching papers, last {{ r.new_days }} days{% if r.matched_new > r.new|length %} (showing {{ r.new|length }} of {{ r.matched_new }}){% endif %}.</p>
+    </div><button type="button" class="btn ghost sm" data-toggle-abstracts>Expand abstracts</button></div>
+    <div class="list dense">{% for h in r.new %}{{ paper_card(h.paper) }}{% else %}<div class="empty">Nothing new in the last {{ r.new_days }} days.</div>{% endfor %}</div>
   </section>
 
   {% if r.categories %}
-  <section>
-    <h2>Where this topic is published</h2>
+  <section id="where">
+    <h2>Where it's published</h2>
     <div class="bars">{% set mx = r.categories[0].n %}{% for c in r.categories %}
-      <a class="hbar" href="/daily?cat={{ c.category }}"><span class="lbl">{{ c.category }} <span class="muted">{{ c.name }}</span></span><span class="fill" style="width:{{ (c.n / mx * 100)|round }}%"></span><span class="num">{{ c.n }}</span></a>
+      <a class="hbar" href="/weekly?cat={{ c.category }}"><span class="lbl"><b>{{ c.category }}</b> <span class="muted">{{ c.name }}</span></span><span class="track"><i style="width:{{ (c.n / mx * 100)|round }}%"></i></span><span class="num">{{ c.n }} · {{ c.share|pct }}</span></a>
     {% endfor %}</div>
   </section>
   {% endif %}

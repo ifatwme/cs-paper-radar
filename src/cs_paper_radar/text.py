@@ -37,6 +37,8 @@ STOPWORDS = frozenset(
     analyzes analyse understanding novel-ly comprehensive superior substantial substantially
     consistently consistent strong stronger robust compared compare comparing comparison
     potential promising various multiple single new lead leads leading
+    times faster fewer increasingly alone highest average best better higher lower
+    percentage points point jointly final
     """.split()
 )
 
@@ -53,17 +55,25 @@ def phrases(text: str, max_n: int = 3) -> list[str]:
     """Candidate key phrases: 1-3 grams that neither start nor end with a stopword,
     with no stopword inside, no pure numbers and no 1-2 letter words."""
     out: list[str] = []
-    for sentence in re.split(r"[.;:!?()\[\],]", text):
+    for sentence in _SENT.split(text):
         toks = tokens(sentence)
-        for n in range(1, max_n + 1):
-            for i in range(len(toks) - n + 1):
-                gram = toks[i : i + n]
-                if any(w in STOPWORDS or len(w) < 3 for w in gram):
-                    continue
-                if n == 1 and len(gram[0]) < 4:
-                    continue
-                out.append(" ".join(gram))
+        run: list[str] = []
+        for w in toks + [""]:  # sentinel flushes the last run
+            if w and len(w) >= 3 and w not in STOPWORDS:
+                run.append(w)
+                continue
+            # emit every n-gram inside a run of content words
+            for i in range(len(run)):
+                if len(run[i]) >= 4:
+                    out.append(run[i])
+                for n in range(2, max_n + 1):
+                    if i + n <= len(run):
+                        out.append(" ".join(run[i : i + n]))
+            run = []
     return out
+
+
+_SENT = re.compile(r"[.;:!?()\[\],]")
 
 
 def phrase_counts(docs: Iterable[str], max_n: int = 3) -> Counter:
@@ -71,4 +81,29 @@ def phrase_counts(docs: Iterable[str], max_n: int = 3) -> Counter:
     df: Counter = Counter()
     for doc in docs:
         df.update(set(phrases(doc, max_n)))
+    return df
+
+
+_ACRONYM = re.compile(r"\b(?=[A-Za-z0-9\-]*[A-Z][A-Za-z0-9\-]*[A-Z0-9])[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9]\b|\b\d+G\b")
+_GENERIC = frozenset("""ai ml dl sota api gpu gpus cpu cpus llm-based ii iii iv""".split())
+
+
+def keyphrases(text: str, max_n: int = 3) -> list[str]:
+    """Informative terms for summaries: 2-3 word phrases plus acronyms and
+    alphanumeric names (LLM, DDoS, IoT, 6G, GPT-4o). Plain single words such as
+    "practical" or "accurate" are too generic to describe a research direction."""
+    out = [p for p in phrases(text, max_n) if " " in p]
+    for m in _ACRONYM.findall(_LATEX.sub(" ", text)):
+        low = m.lower()
+        if len(m) >= 2 and low not in STOPWORDS and low not in _GENERIC and not m.isdigit():
+            if m.endswith("s") and m[:-1].isupper() and len(m) > 2:
+                m = m[:-1]  # LLMs -> LLM
+            out.append(m)
+    return out
+
+
+def keyphrase_counts(docs: Iterable[str], max_n: int = 3) -> Counter:
+    df: Counter = Counter()
+    for doc in docs:
+        df.update(set(keyphrases(doc, max_n)))
     return df

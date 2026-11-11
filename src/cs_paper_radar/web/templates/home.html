@@ -1,45 +1,68 @@
 {% extends "base.html" %}
-{% from "_macros.html" import paper_card, legend %}
+{% from "_macros.html" import paper_card, legend, preset_chips %}
 {% block content %}
 <section class="hero">
-  <div>
+  <div class="hero-text">
+    <p class="eyebrow">arXiv · computer science &amp; engineering</p>
     <h1>What computer science is working on, this week.</h1>
-    <p class="lead">Every new arXiv paper in computer science and computer engineering, listed daily, ranked weekly with a transparent score, and explorable by topic.</p>
-    <div class="kpis">
-      <a href="/daily?date={{ latest }}"><b>{{ "{:,}".format(today_count) }}</b><span>papers on {{ latest }}</span></a>
-      <a href="/weekly?week={{ week }}"><b>{{ "{:,}".format(week_total) }}</b><span>papers in {{ week }}</span></a>
-      <a href="/categories"><b>{{ "{:,}".format(stats.papers) }}</b><span>papers indexed</span></a>
+    <p class="lead">Every new paper, listed daily. The {{ top_n }} that matter most, picked weekly with a score you can inspect. Any topic, turned into a briefing on what's new and where the frontier is.</p>
+    <form class="hero-search" action="/topic" method="get">
+      <input type="search" name="q" placeholder="Try “network security” or “LLM agents”" aria-label="Topic">
+      <button>Explore topic</button>
+    </form>
+  </div>
+  <div class="kpi-grid">
+    <a class="kpi" href="/daily?date={{ latest }}"><span class="kpi-label">Latest day</span><b>{{ "{:,}".format(today_count) }}</b><span class="kpi-sub">papers · {{ latest }}</span></a>
+    <a class="kpi" href="/weekly?week={{ week }}"><span class="kpi-label">This week</span><b>{{ "{:,}".format(week_total) }}</b><span class="kpi-sub">papers · {{ week }}</span></a>
+    <div class="kpi wide">
+      <span class="kpi-label">Papers per day · last 6 weeks</span>
+      {% set mx = (daily|map(attribute='n')|max) if daily else 1 %}
+      <div class="mini-bars" role="img" aria-label="Papers per day">
+        {% for d in daily %}<a href="/daily?date={{ d.pub_date }}" style="height:{{ (d.n / mx * 100)|round }}%" title="{{ d.pub_date }}: {{ d.n }} papers"></a>{% endfor %}
+      </div>
+      <div class="row between small muted"><span>{{ daily[0].pub_date if daily }}</span><span>{{ latest }}</span></div>
     </div>
   </div>
-  <div class="spark card">
-    <div class="muted small">Papers per day, last 4 weeks</div>
-    <svg viewBox="0 0 220 40" preserveAspectRatio="none"><polyline points="{{ daily|map(attribute='n')|list|sparkline }}"/></svg>
-    <div class="row small muted"><span>{{ daily[0].pub_date if daily }}</span><span>{{ latest }}</span></div>
-  </div>
 </section>
 
-<section>
-  <h2>Explore a topic</h2>
-  <div class="chips">{% for t in presets %}<a class="chip" href="/topic?q={{ quote(t) }}">{{ t }}</a>{% endfor %}</div>
-</section>
+<div class="home-grid">
+  <section class="col-main">
+    <div class="section-head">
+      <div>
+        <h2>Top {{ top|length or top_n }} of the week</h2>
+        <p class="muted small">{{ week }} · {{ week|week_label }}{% if week_days < 7 %} · <span class="live">in progress, {{ week_days }} day{{ 's' if week_days != 1 }} so far</span>{% endif %}</p>
+      </div>
+      <div class="head-actions"><a href="/weekly?week={{ prev_week }}" class="btn ghost sm">Last week</a><a href="/weekly?week={{ week }}" class="btn sm">Full ranking</a></div>
+    </div>
+    {{ legend() }}
+    <div class="list">
+    {% for p in top %}{{ paper_card(p, rank=loop.index) }}{% else %}<div class="empty">No scored papers yet — the first pipeline run is still in progress.</div>{% endfor %}
+    </div>
+  </section>
 
-<section>
-  <div class="row between">
-    <h2>Top {{ top|length }} of {{ week }} <span class="muted small">({{ week|week_label }}{{ ', in progress: %d day%s so far'|format(week_days, '' if week_days == 1 else 's') if week_days < 7 }})</span></h2>
-    <span class="small"><a href="/weekly?week={{ prev_week }}">previous week →</a></span>
-  </div>
-  {{ legend() }}
-  {% for p in top %}{{ paper_card(p, rank=loop.index) }}{% else %}<p class="muted">No scored papers yet — the first pipeline run is still in progress.</p>{% endfor %}
-  <p><a class="btn" href="/weekly?week={{ week }}">Full weekly ranking</a></p>
-</section>
-
-<section>
-  <h2>Busiest categories this week</h2>
-  <div class="bars">
-  {% set mx = (top_cats[0][1] if top_cats else 1) %}
-  {% for c, n in top_cats %}
-    <a class="hbar" href="/weekly?week={{ week }}&cat={{ c }}"><span class="lbl">{{ c }} <span class="muted">{{ category_name(c) }}</span></span><span class="fill" style="width:{{ (n / mx * 100)|round }}%"></span><span class="num">{{ n }}</span></a>
-  {% endfor %}
-  </div>
-</section>
+  <aside class="col-side">
+    <div class="panel">
+      <h3>This week by area</h3>
+      {% set amax = (areas|map(attribute='n')|max) or 1 %}
+      <div class="area-bars">
+      {% for a in areas|sort(attribute='n', reverse=true) %}
+        <a href="/weekly?week={{ week }}&area={{ a.slug }}" class="area-bar"><span class="area-dot a-{{ a.slug }}"></span><span class="lbl">{{ a.name }}</span><span class="num">{{ a.n }}</span><span class="track"><i class="a-{{ a.slug }}" style="width:{{ (a.n / amax * 100)|round }}%"></i></span></a>
+      {% endfor %}
+      </div>
+    </div>
+    {% if risers %}
+    <div class="panel">
+      <h3>Accelerating categories</h3>
+      <p class="muted small">Last 7 days vs. the 4 weeks before.</p>
+      <ul class="risers">
+      {% for r in risers %}<li><a href="/weekly?week={{ week }}&cat={{ r.category }}"><b>{{ r.category }}</b> <span class="muted">{{ r.name }}</span></a><span class="up">+{{ '%.0f'|format((2.718281828 ** r.growth - 1) * 100) }}%</span></li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    <div class="panel">
+      <h3>Explore a topic</h3>
+      {{ preset_chips(compact=true) }}
+    </div>
+  </aside>
+</div>
 {% endblock %}

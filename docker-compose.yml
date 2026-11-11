@@ -25,8 +25,11 @@ x-env: &env
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
   TOP_N: ${TOP_N:-20}
   TOP_MAX_PER_CATEGORY: ${TOP_MAX_PER_CATEGORY:-4}
+  TOP_CS_PRIMARY_ONLY: ${TOP_CS_PRIMARY_ONLY:-true}
   SCORE_WEIGHTS: ${SCORE_WEIGHTS:-}
-  UPDATE_LOOKBACK_DAYS: ${UPDATE_LOOKBACK_DAYS:-4}
+  UPDATE_LOOKBACK_DAYS: ${UPDATE_LOOKBACK_DAYS:-8}
+  HEAL_WINDOW_DAYS: ${HEAL_WINDOW_DAYS:-60}
+  HEAL_MAX_DAYS: ${HEAL_MAX_DAYS:-10}
   SITE_NAME: ${SITE_NAME:-CS Paper Radar}
 
 services:
@@ -38,7 +41,7 @@ services:
     image: cs-paper-radar:latest
     restart: unless-stopped
     user: "${RADAR_UID:-10001}:${RADAR_GID:-10001}"
-    tmpfs: ["/tmp:size=64m"]
+    tmpfs: ["/tmp:size=256m"]
     environment:
       <<: *env
       EMBEDDING_THREADS: ${APP_EMBEDDING_THREADS:-1}

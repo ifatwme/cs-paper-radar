@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import threading
 import time
 from collections import Counter
@@ -16,43 +17,28 @@ import numpy as np
 from .config import Settings
 from .db import Database
 from .embed import Embedder, embedder_name, get_embedder
-from .scoring import select_top
+from .scoring import percentile_rank, select_top
 from .taxonomy import category_name
-from .text import phrase_counts, phrases
+from .text import STOPWORDS, keyphrases, phrases
 
 log = logging.getLogger(__name__)
 
-# Curated starting points shown on the home page; any free text works too.
-PRESET_TOPICS = [
-    "network security",
-    "intrusion detection",
-    "LLM agents",
-    "LLM safety and jailbreaks",
-    "retrieval-augmented generation",
-    "diffusion models",
-    "vision-language models",
-    "reinforcement learning from human feedback",
-    "federated learning",
-    "differential privacy",
-    "post-quantum cryptography",
-    "software vulnerability detection",
-    "program synthesis and code generation",
-    "compilers",
-    "distributed systems",
-    "LLM inference serving",
-    "edge computing",
-    "6G wireless networks",
-    "computer architecture accelerators",
-    "quantum computing",
-    "robot learning",
-    "autonomous driving",
-    "graph neural networks",
-    "recommender systems",
-    "human-computer interaction",
-    "formal verification",
-    "approximation algorithms",
-    "speech recognition",
-]
+# Curated starting points shown on the home and topic pages; any free text works too.
+PRESET_GROUPS: dict[str, list[str]] = {
+    "Security & Privacy": ["network security", "intrusion detection", "malware analysis",
+                           "LLM jailbreaks and safety", "differential privacy",
+                           "post-quantum cryptography", "software vulnerability detection"],
+    "AI & ML": ["LLM agents", "reasoning in language models", "reinforcement learning from human feedback",
+                "diffusion models", "vision-language models", "retrieval-augmented generation",
+                "federated learning", "graph neural networks"],
+    "Systems & Networks": ["LLM inference serving", "distributed systems", "edge computing",
+                           "6G wireless networks", "hardware accelerators", "databases and query optimization"],
+    "Software & Theory": ["code generation", "program repair", "formal verification", "compilers",
+                          "approximation algorithms", "quantum computing"],
+    "Robotics & Interaction": ["robot learning", "autonomous driving", "human-computer interaction",
+                               "speech recognition"],
+}
+PRESET_TOPICS = [t for group in PRESET_GROUPS.values() for t in group]
 
 
 class VectorIndex:
@@ -118,6 +104,25 @@ class TopicEngine:
         self.db = db
         self.index = index
         self._embedder: Embedder | None = None
+        self._kp_cache: dict[str, frozenset[str]] = {}
+
+    def _kp(self, h: dict) -> frozenset[str]:
+        """Key phrases of a hit's paper, cached by uid (phrase extraction dominates
+        report time otherwise)."""
+        uid = h["uid"]
+        kp = self._kp_cache.get(uid)
+        if kp is None:
+            if len(self._kp_cache) > 200_000:
+                self._kp_cache.clear()
+            stored = h["paper"].get("keyphrases")
+            kp = self._kp_cache[uid] = frozenset(stored if stored is not None else keyphrases(self._doc(h)))
+        return kp
+
+    def _counts(self, hits) -> Counter:
+        df: Counter = Counter()
+        for h in hits:
+            df.update(self._kp(h))
+        return df
 
     @property
     def embedder(self) -> Embedder | None:
@@ -147,6 +152,13 @@ class TopicEngine:
             if mask.any():
                 idx = np.nonzero(mask)[0]
                 q = self.embedder.embed_query(query)
+                # Pseudo-relevance feedback: short queries embed poorly, so blend in the
+                # centroid of the best keyword matches (when there are enough of them).
+                fb = [v for uid, _ in kw[:20] if (v := self.index.vector(uid)) is not None]
+                if len(fb) >= 5:
+                    c = np.mean(fb, axis=0)
+                    q = q + c / (np.linalg.norm(c) or 1.0)
+                    q = q / (np.linalg.norm(q) or 1.0)
                 sims = self.index.matrix[idx] @ q
                 order = np.argsort(-sims)
                 cutoff = self._semantic_cutoff(sims, kw_count=len(kw))
@@ -156,6 +168,21 @@ class TopicEngine:
                     uid = self.index.uids[idx[j]]
                     sem_rank[uid] = r
                     sem_sim[uid] = float(sims[j])
+                # Keyword hits must also be plausibly on-topic by meaning: a paper that
+                # merely mentions "compile" or "agents" once is not about the topic.
+                # Papers whose title contains the query terms are always kept.
+                pos = {self.index.uids[i]: k for k, i in enumerate(idx)}
+                loose = float(sims.mean() + 2.5 * sims.std())
+                titles = self.db.titles([uid for uid, _ in kw])
+                terms = _query_terms(query)
+                kept = []
+                for uid, score in kw:
+                    k = pos.get(uid)
+                    in_title = all(t in titles.get(uid, "").lower() for t in terms)
+                    if in_title or k is None or sims[k] >= loose:
+                        kept.append((uid, score))
+                kw = kept
+                kw_rank = {uid: i for i, (uid, _) in enumerate(kw)}
 
         fused: dict[str, float] = {}
         for uid, r in kw_rank.items():
@@ -183,9 +210,10 @@ class TopicEngine:
             return 1.0
         top = float(sims.max())
         mean, std = float(sims.mean()), float(sims.std() or 1e-6)
-        z_cut = mean + 3.0 * std
-        band_cut = top - (0.12 if (self.index.model or "").startswith("BAAI/bge") else 0.25)
-        return max(z_cut, band_cut)
+        return max(mean + 4.0 * std, top - self.SEMANTIC_BAND)
+
+    # How far below the best match a paper may be and still count as on-topic.
+    SEMANTIC_BAND = 0.15
 
     # ------------------------------------------------------------- report
     def report(self, query: str, days: int = 30, end: str | None = None,
@@ -212,11 +240,13 @@ class TopicEngine:
             key=lambda h: (h["paper"]["published"], h["relevance"]),
             reverse=True,
         )
-        # Frontier: best composite score among matching papers, nudged by relevance.
+        # Frontier: best composite score among matching papers, weighted by how central
+        # the paper is to the topic (relevance percentile within the window).
         relevant = list(window)
-        for h in relevant:
+        rel_pct = percentile_rank(np.array([h["relevance"] for h in relevant])) if relevant else []
+        for h, rp in zip(relevant, rel_pct):
             total = h["paper"].get("total") or 0.0
-            h["frontier"] = round(total * (0.8 + 0.2 * h["relevance"]), 4)
+            h["frontier"] = round(total * (0.6 + 0.4 * float(rp)), 4)
         ranked = sorted(relevant, key=lambda h: h["frontier"], reverse=True)
         vectors = {h["uid"]: v for h in ranked[:400] if (v := self.index.vector(h["uid"])) is not None}
         frontier = select_top(
@@ -234,7 +264,7 @@ class TopicEngine:
             "new": new[:60],
             "frontier": frontier,
             "emerging": self.emerging_terms(window, prior),
-            "subtopics": self.subtopics(window),
+            "subtopics": self.subtopics(window, query),
             "categories": self._category_mix(window),
             "trend": self._trend(hits, trend_start_d, end_d),
             "semantic": self.index.enabled,
@@ -250,9 +280,9 @@ class TopicEngine:
         phrases over-represented in the recent window relative to the topic's past."""
         if len(window) < 5:
             return {"mode": "none", "terms": []}
-        recent = phrase_counts(self._doc(h) for h in window)
+        recent = self._counts(window)
         if len(prior) >= 20:
-            past = phrase_counts(self._doc(h) for h in prior)
+            past = self._counts(prior)
             mode = "emerging"
         else:
             past = Counter()
@@ -283,7 +313,7 @@ class TopicEngine:
                 break
         return {"mode": mode, "terms": picked}
 
-    def subtopics(self, window: list[dict], max_k: int = 6) -> list[dict]:
+    def subtopics(self, window: list[dict], query: str = "", max_k: int = 6) -> list[dict]:
         """Cluster the topic's recent papers into research directions."""
         rows = [(h, v) for h in window if (v := self.index.vector(h["uid"])) is not None]
         if len(rows) < 20:
@@ -292,19 +322,23 @@ class TopicEngine:
         x = np.vstack(vecs)
         k = int(min(max_k, max(2, len(x) // 25)))
         labels = kmeans(x, k)
-        docs_per_cluster = {c: [self._doc(h) for h, lab in zip(hits, labels) if lab == c] for c in range(k)}
-        df_all = phrase_counts(self._doc(h) for h in hits)
+        df_all = self._counts(hits)
         clusters = []
         for c in range(k):
             members = [h for h, lab in zip(hits, labels) if lab == c]
             if not members:
                 continue
-            df_c = phrase_counts(docs_per_cluster[c])
+            df_c = self._counts(members)
             size = len(members)
             # c-TF-IDF style: frequent inside, rare outside.
             scored = []
+            qterms = _query_terms(query)
             for term, cnt in df_c.items():
                 if cnt < max(2, size * 0.08):
+                    continue
+                # Terms shared by most of the topic (or that restate the query) do not
+                # distinguish one direction from another.
+                if df_all[term] > 0.35 * len(x) or any(t in term.lower() for t in qterms):
                     continue
                 outside = df_all[term] - cnt
                 scored.append((cnt / size * math.log(1 + len(x) / (1 + outside + cnt)), term))
@@ -316,6 +350,9 @@ class TopicEngine:
                 label_terms.append(term)
                 if len(label_terms) == 4:
                     break
+            if not label_terms:  # small/diffuse cluster: fall back to its most frequent terms
+                label_terms = [t for t, _ in df_c.most_common(8)
+                               if not any(q in t.lower() for q in qterms)][:2]
             best = sorted(members, key=lambda h: h["paper"].get("total") or 0, reverse=True)[:3]
             momentum = np.mean([h["paper"].get("momentum") or 0.5 for h in members])
             clusters.append({
@@ -354,6 +391,16 @@ class TopicEngine:
         for w in out:
             w["share"] = round(w["n"] / w["total"], 4) if w["total"] else 0.0
         return out
+
+
+def _query_terms(query: str) -> list[str]:
+    """Lower-cased query words, crudely de-pluralised, for title matching."""
+    out = []
+    for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]+", query.lower()):
+        if w in STOPWORDS:
+            continue
+        out.append(w[:-1] if len(w) > 4 and w.endswith("s") else w)
+    return out
 
 
 def kmeans(x: np.ndarray, k: int, iters: int = 25, seed: int = 0) -> np.ndarray:

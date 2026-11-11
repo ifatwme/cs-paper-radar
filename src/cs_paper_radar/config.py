@@ -64,12 +64,17 @@ class Settings:
     arxiv_api_url: str = field(
         default_factory=lambda: _env("ARXIV_API_URL", "https://export.arxiv.org/api/query")
     )
-    arxiv_page_size: int = field(default_factory=lambda: _env_int("ARXIV_PAGE_SIZE", 500))
+    # One request covers a whole weekday (~900 papers, ~2 s); arXiv allows up to 2000.
+    arxiv_page_size: int = field(default_factory=lambda: _env_int("ARXIV_PAGE_SIZE", 1000))
     arxiv_delay_s: float = field(default_factory=lambda: _env_float("ARXIV_DELAY_S", 3.5))
     arxiv_timeout_s: float = field(default_factory=lambda: _env_float("ARXIV_TIMEOUT_S", 90))
     # Days re-fetched by each daily run: the API publishes a day's submissions
-    # only after arXiv's evening announcement, and late announcements happen.
-    update_lookback_days: int = field(default_factory=lambda: _env_int("UPDATE_LOOKBACK_DAYS", 4))
+    # only after arXiv's evening announcement, late announcements happen, and
+    # authors add acceptance notes / code links in new versions during the week.
+    update_lookback_days: int = field(default_factory=lambda: _env_int("UPDATE_LOOKBACK_DAYS", 8))
+    # Days further back that are re-fetched when incomplete (fewer stored than arXiv reports).
+    heal_window_days: int = field(default_factory=lambda: _env_int("HEAL_WINDOW_DAYS", 60))
+    heal_max_days: int = field(default_factory=lambda: _env_int("HEAL_MAX_DAYS", 10))
 
     # Embeddings (semantic search, novelty, momentum). EMBEDDINGS=off -> keyword only.
     embeddings: str = field(default_factory=lambda: _env("EMBEDDINGS", "fastembed"))
@@ -84,6 +89,11 @@ class Settings:
     top_n: int = field(default_factory=lambda: _env_int("TOP_N", 20))
     top_max_per_category: int = field(
         default_factory=lambda: _env_int("TOP_MAX_PER_CATEGORY", 4)
+    )
+    # Weekly picks only from papers whose *primary* category is CS/EESS; cross-lists
+    # from physics, math, biology... still appear in daily listings and topics.
+    top_cs_primary_only: bool = field(
+        default_factory=lambda: _env("TOP_CS_PRIMARY_ONLY", "true").lower() in ("1", "true", "yes")
     )
     novelty_lookback_days: int = field(
         default_factory=lambda: _env_int("NOVELTY_LOOKBACK_DAYS", 90)

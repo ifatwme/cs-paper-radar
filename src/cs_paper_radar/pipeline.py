@@ -13,6 +13,7 @@ from .db import Database, iso_week
 from .embed import embedder_name, get_embedder, text_hash
 from .scoring import score_week
 from .sources import get_source
+from .text import keyphrases
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +49,10 @@ def ingest(settings: Settings, db: Database, start: date, end: date) -> dict:
                 stats["failed_days"].append(f"{name}:{day}")
                 continue
             ins, upd = db.upsert_papers(papers)
+            reported = getattr(source, "last_total", None)
+            db.log_fetch(name, day.isoformat(), reported, len(papers))
+            if reported is not None and len(papers) < reported:
+                stats.setdefault("partial_days", []).append(f"{name}:{day}")
             stats["days"] += 1
             stats["fetched"] += len(papers)
             stats["inserted"] += ins
@@ -76,6 +81,16 @@ def embed_missing(settings: Settings, db: Database, chunk: int = 512) -> int:
     return done
 
 
+def extract_keyphrases(db: Database) -> int:
+    """Pre-compute key phrases (used by topic reports) for new/changed papers."""
+    done = 0
+    while rows := db.missing_keyphrases():
+        db.save_keyphrases([(r["uid"], sorted(set(keyphrases(f"{r['title']}. {r['abstract']}"))))
+                            for r in rows])
+        done += len(rows)
+    return done
+
+
 def score(settings: Settings, db: Database, weeks: list[str]) -> dict:
     model = embedder_name(settings)
     out = {}
@@ -89,7 +104,26 @@ def weeks_between(start: date, end: date) -> list[str]:
     return sorted({iso_week(d) for d in daterange(start, end)})
 
 
-def run(settings: Settings, kind: str, start: date, end: date, rescore_from: date | None = None) -> dict:
+def heal(settings: Settings, db: Database, before: date) -> dict:
+    """Re-fetch older days that are missing or incomplete (failed/partial runs,
+    arXiv outages) so gaps close by themselves on later runs."""
+    start = before - timedelta(days=settings.heal_window_days)
+    end = before - timedelta(days=1)
+    first, _ = db.date_range()
+    if first:  # never reach back before the first backfilled day
+        start = max(start, date.fromisoformat(first))
+    days: list[date] = []
+    for name in settings.sources:
+        days += [date.fromisoformat(d) for d in db.incomplete_days(name, start.isoformat(), end.isoformat())]
+    days = sorted(set(days))[: settings.heal_max_days]
+    out = {"days": [d.isoformat() for d in days], "inserted": 0}
+    for d in days:
+        out["inserted"] += ingest(settings, db, d, d)["inserted"]
+    return out
+
+
+def run(settings: Settings, kind: str, start: date, end: date, rescore_from: date | None = None,
+        heal_gaps: bool = False) -> dict:
     db = Database(settings.db_path)
     db.init()
     with pipeline_lock(settings):
@@ -97,9 +131,14 @@ def run(settings: Settings, kind: str, start: date, end: date, rescore_from: dat
         stats: dict = {"start": start.isoformat(), "end": end.isoformat()}
         try:
             stats["ingest"] = ingest(settings, db, start, end)
+            if heal_gaps:
+                stats["heal"] = heal(settings, db, start)
+                if stats["heal"]["days"]:
+                    rescore_from = min([rescore_from or start] + [date.fromisoformat(d) for d in stats["heal"]["days"]])
             stats["embedded"] = embed_missing(settings, db)
+            stats["keyphrases"] = extract_keyphrases(db)
             stats["scored"] = score(settings, db, weeks_between(rescore_from or start, end))
-            status = "ok" if not stats["ingest"]["failed_days"] else "partial"
+            status = "ok" if not (stats["ingest"]["failed_days"] or stats["ingest"].get("partial_days")) else "partial"
         except BaseException as exc:
             stats["error"] = repr(exc)
             db.finish_run(run_id, "error", stats)
@@ -113,7 +152,7 @@ def daily_update(settings: Settings) -> dict:
     start = today - timedelta(days=settings.update_lookback_days)
     # Re-score from the start of the previous week: late arrivals change ranks.
     rescore_from = min(start, today - timedelta(days=today.weekday() + 7))
-    return run(settings, "update", start, today, rescore_from=rescore_from)
+    return run(settings, "update", start, today, rescore_from=rescore_from, heal_gaps=True)
 
 
 def backfill(settings: Settings, start: date, end: date) -> dict:
@@ -125,7 +164,7 @@ def rescore(settings: Settings, start: date, end: date) -> dict:
     db.init()
     with pipeline_lock(settings):
         run_id = db.start_run("rescore")
-        stats = {"embedded": embed_missing(settings, db),
+        stats = {"embedded": embed_missing(settings, db), "keyphrases": extract_keyphrases(db),
                  "scored": score(settings, db, weeks_between(start, end))}
         db.finish_run(run_id, "ok", stats)
         return stats

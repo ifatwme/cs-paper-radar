@@ -76,6 +76,30 @@ def area_of(code: str) -> str:
     return "Other"
 
 
+def home_category(primary: str, categories: list[str]) -> str:
+    """The paper's CS/CE home: its primary category, or - for papers whose primary
+    is outside CS/EESS (math.OC, stat.ML, q-bio...) - the first CS/EESS cross-list."""
+    if primary in CATEGORY_NAMES:
+        return primary
+    for c in categories or []:
+        if c in CATEGORY_NAMES:
+            return c
+    return primary
+
+
+AREA_SLUGS: dict[str, str] = {
+    "ai": "AI & Machine Learning",
+    "media": "Language, Vision & Media",
+    "security": "Security & Privacy",
+    "systems": "Systems & Networking",
+    "software": "Software & Programming",
+    "theory": "Theory & Algorithms",
+    "robotics": "Robotics, Control & Signals",
+    "society": "People & Society",
+}
+SLUG_OF_AREA = {v: k for k, v in AREA_SLUGS.items()}
+
+
 def in_scope(code: str, patterns: list[str]) -> bool:
     """`patterns` like ["cs.*", "eess.SY"] -> does `code` match any of them?"""
     for pattern in patterns:

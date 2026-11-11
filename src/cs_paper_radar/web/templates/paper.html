@@ -1,39 +1,59 @@
 {% extends "base.html" %}
-{% from "_macros.html" import paper_card, score_bar %}
+{% from "_macros.html" import paper_card, cat_chip %}
 {% block title %}{{ p.title }} · {{ site_name }}{% endblock %}
 {% block content %}
-<article class="detail">
-  <h1>{{ p.title }}</h1>
-  <p class="meta">{{ p.authors|join(', ') }}</p>
-  <p class="meta">
-    <a class="cat" href="/daily?date={{ p.pub_date }}&cat={{ p.primary_category }}">{{ p.primary_category }}</a> {{ category_name(p.primary_category) }}
-    {% for c in p.categories if c != p.primary_category %}<span class="cat x" title="{{ category_name(c) }}">{{ c }}</span>{% endfor %}
-    · submitted {{ p.published[:16]|replace('T', ' ') }} UTC · v{{ p.version }} · {{ p.uid }}
-  </p>
-  {% if p.tags %}<div class="tags">{% for t in p.tags %}<span class="tag t-{{ t|replace(' ', '-')|replace('/', '-') }}">{{ t }}</span>{% endfor %}</div>{% endif %}
-  <p class="links"><a class="btn" href="{{ p.abs_url }}" target="_blank" rel="noopener">arXiv page</a> <a class="btn" href="{{ p.pdf_url }}" target="_blank" rel="noopener">PDF</a> <a class="btn ghost" href="/weekly?week={{ p.week }}">week {{ p.week }}</a></p>
-  {% if p.comment %}<p class="muted">Comment: {{ p.comment }}</p>{% endif %}
-  {% if p.journal_ref %}<p class="muted">Journal ref: {{ p.journal_ref }}</p>{% endif %}
-  <h2>Abstract</h2>
-  <p class="abstract">{{ p.abstract }}</p>
+<nav class="crumbs small"><a href="/daily?date={{ p.pub_date }}">{{ p.pub_date }}</a> › <a href="/daily?date={{ p.pub_date }}&cat={{ p.home }}">{{ p.home }}</a> › <span class="muted">{{ p.uid }}</span></nav>
+<div class="detail-grid">
+  <article class="detail">
+    <h1>{{ p.title }}</h1>
+    <p class="authors-full">{{ p.authors|join(', ') }}</p>
+    <div class="meta">
+      <span class="area-dot a-{{ p.area_slug }}" title="{{ p.area }}"></span>{{ cat_chip(p.home, true) }}
+      {% for c in p.categories if c != p.home %}{{ cat_chip(c) }}{% endfor %}
+      <span class="sep">·</span><span class="muted">submitted {{ p.published[:16]|replace('T', ' ') }} UTC · v{{ p.version }}</span>
+    </div>
+    {% if p.tags %}<div class="tags">{% for t in p.tags %}<span class="tag t-{{ t|replace(' ', '-')|replace('/', '-') }}">{{ t }}</span>{% endfor %}</div>{% endif %}
+    <div class="actions"><a class="btn" href="{{ p.pdf_url }}" target="_blank" rel="noopener">Read PDF</a><a class="btn ghost" href="{{ p.abs_url }}" target="_blank" rel="noopener">arXiv page</a><a class="btn ghost" href="/weekly?week={{ p.week }}">Week {{ p.week }}</a><button class="btn ghost" type="button" data-copy="{{ p.abs_url }}">Copy link</button></div>
+    <h2>Abstract</h2>
+    <p class="abstract">{{ p.abstract }}</p>
+    {% if p.keyphrases %}
+    <div class="kp"><span class="kpi-label">Explore related topics</span>
+      <div class="chips">{% for k in related_terms %}<a class="chip" href="/topic?q={{ quote(k) }}">{{ k }}</a>{% endfor %}</div>
+    </div>
+    {% endif %}
+    {% if p.comment or p.journal_ref or p.doi %}
+    <dl class="facts">
+      {% if p.comment %}<dt>Comment</dt><dd>{{ p.comment }}</dd>{% endif %}
+      {% if p.journal_ref %}<dt>Journal ref</dt><dd>{{ p.journal_ref }}</dd>{% endif %}
+      {% if p.doi %}<dt>DOI</dt><dd><a href="https://doi.org/{{ p.doi }}">{{ p.doi }}</a></dd>{% endif %}
+    </dl>
+    {% endif %}
+  </article>
 
-  {% if p.total is not none %}
-  <h2>Why it ranks where it does</h2>
-  <table class="breakdown">
-    <thead><tr><th>Signal</th><th>Value</th><th>Weight</th><th>Contribution</th><th>Evidence</th></tr></thead>
-    <tbody>
+  <aside class="panel score-panel">
+    {% if p.total is not none %}
+    <div class="score-big"><b>{{ '%.2f'|format(p.total) }}</b><span class="muted">frontier score</span></div>
+    <span class="sbar big">{% for s in signals %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * (p[s] or 0) * 100)|round(1) }}%"></i>{% endfor %}</span>
+    <div class="signals">
     {% for s in signals %}
-      <tr><td><i class="dot sig-{{ s }}"></i>{{ signal_labels[s] }}</td><td>{{ '%.2f'|format(p[s] or 0) }}</td><td>{{ (weights[s] * 100)|round|int }}%</td><td>{{ '%.3f'|format(weights[s] * (p[s] or 0)) }}</td><td class="muted">{{ (p.details or {}).get(s, '') }}</td></tr>
+      <div class="signal">
+        <div class="row between"><span><i class="dot sig-{{ s }}"></i>{{ signal_labels[s] }} <span class="muted small">× {{ (weights[s] * 100)|round|int }}%</span></span><b>{{ '%.2f'|format(p[s] or 0) }}</b></div>
+        <span class="pop-bar wide"><b class="sig-{{ s }}" style="width:{{ ((p[s] or 0) * 100)|round }}%"></b></span>
+        {% set ev = (p.details or {}).get(s, '') %}{% if ev %}<div class="muted small evidence">{{ ev }}</div>{% endif %}
+      </div>
     {% endfor %}
-    </tbody>
-    <tfoot><tr><td>Total</td><td colspan="2"></td><td><b>{{ '%.3f'|format(p.total) }}</b></td><td>{{ score_bar(p) }}</td></tr></tfoot>
-  </table>
-  {% endif %}
-</article>
+    </div>
+    <p class="small"><a href="/about">How the score works</a></p>
+    {% else %}
+    <p class="muted">Not scored yet — scores are computed after each daily update.</p>
+    {% endif %}
+  </aside>
+</div>
+
 {% if similar %}
 <section>
-  <h2>Closest papers</h2>
-  {% for s in similar %}{{ paper_card(s, extra='similarity ' ~ ('%.2f'|format(s.similarity))) }}{% endfor %}
+  <div class="section-head"><div><h2>Closest papers</h2><p class="muted small">Nearest neighbours by meaning across the whole index.</p></div></div>
+  <div class="list">{% for s in similar %}{{ paper_card(s, extra='similarity ' ~ ('%.2f'|format(s.similarity))) }}{% endfor %}</div>
 </section>
 {% endif %}
 {% endblock %}

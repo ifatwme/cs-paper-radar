@@ -2,18 +2,30 @@
 {% from "_macros.html" import paper_card, legend %}
 {% block title %}Top {{ n }} · {{ week }} · {{ site_name }}{% endblock %}
 {% block content %}
-<div class="row between">
-  <h1>Top {{ n }} of {{ week }}{% if cat %} in {{ cat }}{% endif %} <span class="muted small">{{ week|week_label }}</span></h1>
-  <div class="pager"><a href="/weekly?week={{ prev_week }}&n={{ n }}&cat={{ cat }}">← {{ prev_week }}</a> <a href="/weekly?week={{ next_week }}&n={{ n }}&cat={{ cat }}">{{ next_week }} →</a></div>
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Weekly top {{ n }}{% if area %} · {{ area_slugs[area] }}{% endif %}{% if cat %} · {{ cat }}{% endif %}</p>
+    <h1>{{ week }} <span class="muted thin">{{ week|week_label }}</span></h1>
+    <p class="muted">Ranked from {{ "{:,}".format(total) }} papers submitted on {{ days_with_data }} day{{ 's' if days_with_data != 1 }}{% if days_with_data < 7 %} — <span class="live">week in progress, ranks can still change</span>{% endif %}.
+    {% if not cat %}At most {{ max_per_cat }} papers per category and no near-duplicates, so one busy field can't fill the list.{% endif %}</p>
+  </div>
+  <div class="date-nav">
+    <a class="btn ghost sm" href="/weekly?week={{ prev_week }}&n={{ n }}&cat={{ cat }}&area={{ area }}">← {{ prev_week }}</a>
+    {% if week != latest_week %}<a class="btn ghost sm" href="/weekly?week={{ next_week }}&n={{ n }}&cat={{ cat }}&area={{ area }}">{{ next_week }} →</a>{% endif %}
+  </div>
 </div>
-<p class="muted small">Selected from {{ "{:,}".format(total) }} papers submitted on {{ days_with_data }} day{{ 's' if days_with_data != 1 }} of this week{% if days_with_data < 7 %} (week still in progress — ranks can change until it closes){% endif %}.
-{% if not cat %} At most {{ max_per_cat }} papers per primary category and no near-duplicates, so one busy field cannot fill the whole list.{% endif %}</p>
-<form class="filters" method="get" action="/weekly">
-  <label>Week <select name="week" onchange="this.form.submit()">{% for w in weeks %}<option {{ 'selected' if w == week }}>{{ w }}</option>{% endfor %}</select></label>
-  <label>How many <select name="n" onchange="this.form.submit()">{% for k in [10, 20, 30, 50, 100] %}<option {{ 'selected' if k == n }}>{{ k }}</option>{% endfor %}</select></label>
-  <label>Category <select name="cat" onchange="this.form.submit()"><option value="">all</option>{% for c, name in all_categories.items() %}<option value="{{ c }}" {{ 'selected' if c == cat }}>{{ c }} — {{ name }}</option>{% endfor %}</select></label>
-  <noscript><button>Apply</button></noscript>
+
+<form class="toolbar" method="get" action="/weekly">
+  <select name="week" data-autosubmit aria-label="Week">{% for w in weeks %}<option value="{{ w }}" {{ 'selected' if w == week }}>{{ w }} · {{ w|week_label }}</option>{% endfor %}</select>
+  <select name="area" data-autosubmit aria-label="Area"><option value="">All areas</option>{% for s, name in area_slugs.items() %}<option value="{{ s }}" {{ 'selected' if s == area }}>{{ name }}</option>{% endfor %}</select>
+  <select name="cat" data-autosubmit aria-label="Category"><option value="">All categories</option>{% for c, name in all_categories.items() %}<option value="{{ c }}" {{ 'selected' if c == cat }}>{{ c }} — {{ name }}</option>{% endfor %}</select>
+  <input type="hidden" name="n" value="{{ n }}">
 </form>
-{{ legend() }}
-{% for p in papers %}{{ paper_card(p, rank=loop.index) }}{% else %}<p class="muted">No scored papers for this week yet.</p>{% endfor %}
+<div class="toolbar-row">
+  <div class="seg" role="group" aria-label="How many">{% for k in [10, 20, 50, 100] %}<a href="/weekly?week={{ week }}&n={{ k }}&cat={{ cat }}&area={{ area }}" class="{{ 'on' if k == n }}">Top {{ k }}</a>{% endfor %}</div>
+  {{ legend() }}
+</div>
+<div class="list">
+{% for p in papers %}{{ paper_card(p, rank=loop.index) }}{% else %}<div class="empty">No scored papers for this selection yet.</div>{% endfor %}
+</div>
 {% endblock %}

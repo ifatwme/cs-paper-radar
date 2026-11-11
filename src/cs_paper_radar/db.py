@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS papers (
     week             TEXT NOT NULL,           -- ISO week, e.g. 2026-W46
     updated          TEXT,
     withdrawn        INTEGER NOT NULL DEFAULT 0,
+    keyphrases       TEXT,                    -- JSON list, filled by the pipeline
     first_seen       TEXT NOT NULL,
     last_seen        TEXT NOT NULL
 );
@@ -67,7 +68,8 @@ CREATE TRIGGER IF NOT EXISTS papers_ad AFTER DELETE ON papers BEGIN
     INSERT INTO papers_fts(papers_fts, rowid, title, abstract, authors, comment)
     VALUES ('delete', old.rowid, old.title, old.abstract, old.authors, old.comment);
 END;
-CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
+-- Only text columns feed the index: bookkeeping updates (last_seen, keyphrases) skip it.
+CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE OF title, abstract, authors, comment ON papers BEGIN
     INSERT INTO papers_fts(papers_fts, rowid, title, abstract, authors, comment)
     VALUES ('delete', old.rowid, old.title, old.abstract, old.authors, old.comment);
     INSERT INTO papers_fts(rowid, title, abstract, authors, comment)
@@ -103,6 +105,16 @@ CREATE TABLE IF NOT EXISTS weekly_picks (
     uid      TEXT NOT NULL REFERENCES papers(uid) ON DELETE CASCADE,
     total    REAL NOT NULL,
     PRIMARY KEY (week, rank)
+);
+
+-- One row per (source, day): what the source reported vs. what we stored.
+CREATE TABLE IF NOT EXISTS fetch_log (
+    source     TEXT NOT NULL,
+    day        TEXT NOT NULL,
+    reported   INTEGER,
+    fetched    INTEGER NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (source, day)
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -157,7 +169,7 @@ def build_fts_query(text: str, mode: str = "and") -> str:
 
 def row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
-    for key in ("authors", "categories", "tags", "details"):
+    for key in ("authors", "categories", "tags", "details", "keyphrases"):
         if key in d and isinstance(d[key], str):
             d[key] = json.loads(d[key])
     return d
@@ -188,7 +200,11 @@ class Database:
 
     def init(self) -> None:
         with self.session() as conn:
+            conn.execute("DROP TRIGGER IF EXISTS papers_au")  # v0.1.0 fired on every update
             conn.executescript(SCHEMA)
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(papers)")}
+            if "keyphrases" not in cols:  # migration for databases created by v0.1.0
+                conn.execute("ALTER TABLE papers ADD COLUMN keyphrases TEXT")
 
     # ------------------------------------------------------------------ writes
     def upsert_papers(self, papers: Iterable[Paper]) -> tuple[int, int]:
@@ -251,7 +267,7 @@ class Database:
                         authors=:authors, n_authors=:n_authors, primary_category=:primary_category,
                         categories=:categories, comment=:comment, journal_ref=:journal_ref,
                         doi=:doi, pdf_url=:pdf_url, updated=:updated, withdrawn=:withdrawn,
-                        last_seen=:now WHERE uid=:uid""",
+                        keyphrases=NULL, last_seen=:now WHERE uid=:uid""",
                         values,
                     )
                     updated += 1
@@ -269,6 +285,19 @@ class Database:
             conn.executemany(
                 "INSERT OR REPLACE INTO embeddings(uid, model, text_hash, vec) VALUES (?,?,?,?)",
                 [(uid, model, h, v.astype(np.float32).tobytes()) for uid, h, v in rows],
+            )
+
+    def missing_keyphrases(self, limit: int = 5000) -> list[sqlite3.Row]:
+        with self.session() as conn:
+            return conn.execute(
+                "SELECT uid, title, abstract FROM papers WHERE keyphrases IS NULL LIMIT ?", (limit,)
+            ).fetchall()
+
+    def save_keyphrases(self, rows: list[tuple[str, list[str]]]) -> None:
+        with self.session() as conn:
+            conn.executemany(
+                "UPDATE papers SET keyphrases=? WHERE uid=?",
+                [(json.dumps(kp, ensure_ascii=False), uid) for uid, kp in rows],
             )
 
     def save_scores(self, rows: list[dict]) -> None:
@@ -298,6 +327,44 @@ class Database:
                 [(week, i + 1, uid, total) for i, (uid, total) in enumerate(picks)],
             )
 
+    def log_fetch(self, source: str, day: str, reported: int | None, fetched: int) -> None:
+        with self.session() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO fetch_log(source, day, reported, fetched, fetched_at) "
+                "VALUES (?,?,?,?,?)",
+                (source, day, reported, fetched, utcnow()),
+            )
+
+    def incomplete_days(self, source: str, start: str, end: str) -> list[str]:
+        """Days never fetched, or fetched with fewer papers than the source reported."""
+        with self.session() as conn:
+            logged = {
+                r["day"]: (r["reported"], r["fetched"])
+                for r in conn.execute(
+                    "SELECT day, reported, fetched FROM fetch_log WHERE source=? AND day BETWEEN ? AND ?",
+                    (source, start, end),
+                )
+            }
+            stored = {
+                r["pub_date"]: r["n"]
+                for r in conn.execute(
+                    "SELECT pub_date, COUNT(*) AS n FROM papers WHERE source=? AND pub_date BETWEEN ? AND ? "
+                    "GROUP BY pub_date",
+                    (source, start, end),
+                )
+            }
+        out = []
+        d = date.fromisoformat(start)
+        while d.isoformat() <= end:
+            key = d.isoformat()
+            rep = logged.get(key)
+            if rep is None and not stored.get(key):
+                out.append(key)          # nothing known about this day
+            elif rep is not None and rep[0] is not None and rep[1] < rep[0]:
+                out.append(key)          # partial fetch
+            d = date.fromordinal(d.toordinal() + 1)
+        return out
+
     def start_run(self, kind: str) -> int:
         with self.session() as conn:
             cur = conn.execute(
@@ -316,7 +383,7 @@ class Database:
     PAPER_COLUMNS = """p.uid, p.source, p.native_id, p.version, p.title, p.abstract, p.authors,
         p.n_authors, p.primary_category, p.categories, p.comment, p.journal_ref, p.doi,
         p.abs_url, p.pdf_url, p.published, p.pub_date, p.week, p.updated, p.withdrawn,
-        s.total, s.venue, s.artifacts, s.momentum, s.novelty, s.breadth, s.substance, s.team,
+        p.keyphrases, s.total, s.venue, s.artifacts, s.momentum, s.novelty, s.breadth, s.substance, s.team,
         s.tags, s.details"""
 
     def _select(self, where: str, params: tuple | dict = (), tail: str = "") -> list[dict]:
@@ -368,6 +435,16 @@ class Database:
             where += " AND s.total IS NOT NULL"
         return self._select(where, params, "ORDER BY s.total DESC NULLS LAST")
 
+    def titles(self, uids: list[str]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        with self.session() as conn:
+            for i in range(0, len(uids), 900):
+                chunk = uids[i : i + 900]
+                marks = ",".join("?" * len(chunk))
+                out.update({r[0]: r[1] for r in conn.execute(
+                    f"SELECT uid, title FROM papers WHERE uid IN ({marks})", chunk)})
+        return out
+
     def weekly_picks(self, week: str) -> list[dict]:
         with self.session() as conn:
             rows = conn.execute(
@@ -417,7 +494,7 @@ class Database:
     def load_vectors(
         self, model: str, start: str | None = None, end: str | None = None
     ) -> tuple[list[str], list[str], np.ndarray]:
-        """Return (uids, pub_dates, matrix[n, d]) for a date window, ordered by date."""
+        """Return (uids, pub_dates, matrix[n, d]) for a date window (unordered)."""
         sql = (
             "SELECT p.uid, p.pub_date, e.vec FROM embeddings e JOIN papers p ON p.uid = e.uid "
             "WHERE e.model = ? AND p.withdrawn = 0"
@@ -429,7 +506,7 @@ class Database:
         if end:
             sql += " AND p.pub_date <= ?"
             params.append(end)
-        sql += " ORDER BY p.published"
+        # No ORDER BY: sorting rows that carry blobs spills a temp b-tree to /tmp.
         uids, dates, vecs = [], [], []
         with self.session() as conn:
             for r in conn.execute(sql, params):

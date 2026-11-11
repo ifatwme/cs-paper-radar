@@ -5,37 +5,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_name }}{% endblock %}</title>
   <meta name="description" content="Daily arXiv computer science & engineering papers, weekly top picks and topic frontiers.">
-  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+  <script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;})();</script>
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
   <link rel="alternate" type="application/rss+xml" title="Weekly top papers" href="/feed/weekly.xml">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='none' stroke='%232563eb' stroke-width='3'/><circle cx='16' cy='16' r='7' fill='none' stroke='%232563eb' stroke-width='3'/><circle cx='16' cy='16' r='2' fill='%232563eb'/></svg>">
+  <script src="/static/app.js?v={{ asset_version }}" defer></script>
 </head>
 <body>
+<a class="skip" href="#content">Skip to content</a>
 <header class="top">
   <div class="wrap bar">
-    <a class="brand" href="/"><span class="logo">◎</span> {{ site_name }}</a>
-    <nav>
-      <a href="/daily" class="{{ 'on' if request.url.path == '/daily' }}">Daily</a>
-      <a href="/weekly" class="{{ 'on' if request.url.path == '/weekly' }}">Weekly top</a>
-      <a href="/topic" class="{{ 'on' if request.url.path == '/topic' }}">Topics</a>
-      <a href="/categories" class="{{ 'on' if request.url.path == '/categories' }}">Categories</a>
-      <a href="/about" class="{{ 'on' if request.url.path == '/about' }}">Method</a>
-      <a href="/api/docs">API</a>
+    <a class="brand" href="/"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13"/><circle cx="16" cy="16" r="7"/><circle cx="16" cy="16" r="1.8" class="core"/><path d="M16 16 L27 8" class="sweep"/></svg><span>{{ site_name }}</span></a>
+    {% set path = request.url.path %}
+    <nav class="main-nav">
+      <a href="/daily" class="{{ 'on' if path == '/daily' }}">Daily</a>
+      <a href="/weekly" class="{{ 'on' if path == '/weekly' }}">Weekly top</a>
+      <a href="/topic" class="{{ 'on' if path == '/topic' }}">Topics</a>
+      <a href="/categories" class="{{ 'on' if path == '/categories' }}">Categories</a>
+      <a href="/about" class="{{ 'on' if path == '/about' }}">Method</a>
     </nav>
-    <form class="search" action="/topic" method="get">
-      <input type="search" name="q" placeholder="Explore a topic, e.g. network security" value="{{ q|default('') }}" aria-label="Topic">
+    <form class="search" action="/topic" method="get" role="search">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4 4"/></svg>
+      <input type="search" name="q" id="global-search" placeholder="Explore a topic…" value="{{ q|default('') }}" aria-label="Explore a topic" autocomplete="off">
+      <kbd>/</kbd>
     </form>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a7 7 0 1 0 7 7 5.5 5.5 0 0 1-7-7z"/></svg>
+    </button>
   </div>
 </header>
-<main class="wrap">
+<main class="wrap" id="content">
 {% block content %}{% endblock %}
 </main>
-<footer class="wrap foot">
-  {% if stats %}
-  <span>{{ "{:,}".format(stats.papers) }} papers · {{ stats.first_date }} → {{ stats.latest_date }}</span>
-  {% if stats.last_run %}<span>last update {{ stats.last_run.finished[:16]|replace('T', ' ') }} UTC</span>{% endif %}
-  {% endif %}
-  <span>Metadata from the <a href="https://info.arxiv.org/help/api/index.html">arXiv API</a>. Thank you to arXiv for use of its open access interoperability.</span>
-  <span><a href="https://github.com/ifatwme/cs-paper-radar">source</a> · v{{ version }}</span>
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div>
+      <b>{{ site_name }}</b> — what computer science is working on, every day.
+      {% if stats %}<br><span class="muted">{{ "{:,}".format(stats.papers) }} papers indexed · {{ stats.first_date }} → {{ stats.latest_date }}{% if stats.last_run %} · updated {{ stats.last_run.finished[:16]|replace('T', ' ') }} UTC{% endif %}</span>{% endif %}
+    </div>
+    <div class="foot-links">
+      <a href="/api/docs">API</a><a href="/feed/weekly.xml">RSS</a><a href="https://github.com/ifatwme/cs-paper-radar">GitHub</a><span class="muted">v{{ version }}</span>
+    </div>
+    <div class="muted small foot-note">Metadata from the <a href="https://info.arxiv.org/help/api/index.html">arXiv API</a>. Thank you to arXiv for use of its open access interoperability. Not affiliated with arXiv.</div>
+  </div>
 </footer>
 </body>
 </html>

@@ -5,7 +5,7 @@
 <h1>How the radar works</h1>
 
 <h2>Coverage</h2>
-<p>Every day the pipeline asks the <a href="https://info.arxiv.org/help/api/user-manual.html">arXiv API</a> for all papers first submitted in these categories (primary or cross-listed): <code>{{ settings.arxiv_categories|join(', ') }}</code>. The last {{ settings.update_lookback_days }} days are re-fetched on every run, because arXiv publishes a day's submissions only after its evening announcement and updates (new versions, acceptance notes) arrive later.</p>
+<p>Every day the pipeline asks the <a href="https://info.arxiv.org/help/api/user-manual.html">arXiv API</a> for all papers first submitted in these categories (primary or cross-listed): <code>{{ settings.arxiv_categories|join(', ') }}</code>. The last {{ settings.update_lookback_days }} days are re-fetched on every run, because arXiv publishes a day's submissions only after its evening announcement and updates (new versions, acceptance notes) arrive later. Older days that are missing or were stored incompletely are repaired automatically.</p>
 
 <h2>The frontier score</h2>
 <p>arXiv does not publish citations, downloads or votes, so new papers are ranked with signals that can be computed from the paper itself and from the rest of the corpus. Every signal is in [0, 1]; the score is their weighted sum. Each paper page shows the value and the evidence for every signal.</p>
@@ -24,7 +24,7 @@
 <p>Momentum and novelty pull in opposite directions on purpose: one rewards joining a fast-moving direction, the other rewards leaving the crowd. The weekly top {{ settings.top_n }} takes at most {{ settings.top_max_per_category }} papers per primary category and skips near-duplicates, so one busy field cannot fill the list. Weights are configurable (<code>SCORE_WEIGHTS</code>), and citation counts or community votes can be added as further signals when more sources are connected.</p>
 
 <h2>Topics</h2>
-<p>A topic query is matched two ways: BM25 keyword search over titles and abstracts (all words must appear), and semantic search with sentence embeddings (<code>{{ settings.embedding_model }}</code>, run locally). Results are fused by reciprocal rank. For the matching papers the radar shows:</p>
+<p>A topic query is matched two ways: BM25 keyword search over titles and abstracts (the query words close together, falling back to all words anywhere), and semantic search with sentence embeddings (<code>{{ settings.embedding_model }}</code>, run locally). Results are fused by reciprocal rank. For the matching papers the radar shows:</p>
 <ul>
 <li><b>What's new</b> — the most recent matching papers.</li>
 <li><b>Frontier</b> — the highest frontier scores among clearly relevant papers in the window.</li>

@@ -82,3 +82,19 @@ def test_phrases_skip_stopwords():
     ph = phrases("We propose a novel intrusion detection system for network traffic.")
     assert "intrusion detection" in ph and "network traffic" in ph
     assert not any(p.startswith("propose") or p == "novel" for p in ph)
+
+
+def test_keyphrases_keep_phrases_and_acronyms():
+    from cs_paper_radar.text import keyphrases
+
+    kp = keyphrases("We study LLMs for DDoS detection in 6G networks. The approach is practical and accurate.")
+    assert "ddos detection" in kp and "LLM" in kp and "DDoS" in kp and "6G" in kp
+    assert "practical" not in kp and "accurate" not in kp
+
+
+def test_home_category_for_cross_listed_papers():
+    from cs_paper_radar.taxonomy import area_of, home_category
+
+    assert home_category("cs.CR", ["cs.CR", "cs.LG"]) == "cs.CR"
+    assert home_category("math.OC", ["math.OC", "eess.SY", "cs.LG"]) == "eess.SY"
+    assert area_of(home_category("stat.ML", ["stat.ML", "cs.LG"])) == "AI & Machine Learning"

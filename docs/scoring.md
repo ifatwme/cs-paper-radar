@@ -39,7 +39,7 @@ Vectors: `sentence-transformers/all-MiniLM-L6-v2` (384-d) on title + abstract, c
 (strictly earlier days), converted to a percentile within the week. Neutral (0.5) until at least 200
 historical papers exist.
 
-**Momentum**: a similarity threshold `t` is set at the 99.8th percentile of random cross-pair
+**Momentum**: a similarity threshold `t` is set at the 99.5th percentile of random cross-pair
 similarities (adapts to the model). For each paper, count same-week papers above `t` (`c_now`) and
 baseline papers from the previous 4 weeks above `t`, scaled to one week (`expected`). Raw momentum is
 `ln((c_now + 1) / (expected + 1)) · min(1, c_now / 3) + 0.05 · ln(1 + c_now)` — growth of the

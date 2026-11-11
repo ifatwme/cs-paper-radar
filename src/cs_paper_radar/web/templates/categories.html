@@ -1,22 +1,31 @@
 {% extends "base.html" %}
 {% block title %}Categories · {{ site_name }}{% endblock %}
 {% block content %}
-<h1>Categories</h1>
-<p class="muted">Papers listed in each category (primary or cross-list) in the last 7 days, against the weekly average of the 4 weeks before. Growth is the log ratio; green = accelerating.</p>
+<div class="page-head"><div>
+  <p class="eyebrow">Categories</p>
+  <h1>Where the volume is, and where it's growing</h1>
+  <p class="muted">Papers listed in each category (primary or cross-list) in the last 7 days, against the weekly average of the 4 weeks before.</p>
+</div></div>
+<div class="cat-areas">
 {% for area, rows in areas %}
-<h2>{{ area }}</h2>
-<table class="cats">
-  <thead><tr><th>Category</th><th>Last 7 days</th><th>Prev. 4-week avg</th><th>Change</th><th></th></tr></thead>
-  <tbody>
-  {% for r in rows|sort(attribute='last7', reverse=true) %}
-    <tr>
-      <td><a href="/daily?cat={{ r.category }}"><b>{{ r.category }}</b></a> {{ r.name }}</td>
-      <td>{{ r.last7 }}</td><td>{{ r.avg_prev4 }}</td>
-      <td class="{{ 'up' if r.growth > 0.1 else ('down' if r.growth < -0.1 else '') }}">{{ '%+.0f'|format((2.718281828 ** r.growth - 1) * 100) }}%</td>
-      <td class="small"><a href="/weekly?week={{ week }}&cat={{ r.category }}">top of week</a></td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<section class="panel">
+  <h2>{{ area }}</h2>
+  {% set mx = (rows|map(attribute='last7')|max) or 1 %}
+  <table class="cats">
+    <thead><tr><th>Category</th><th class="r">7 days</th><th class="r">Change</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows|sort(attribute='last7', reverse=true) %}
+      <tr>
+        <td><a href="/weekly?week={{ week }}&cat={{ r.category }}" title="Top papers of the week in {{ r.category }}"><b>{{ r.category }}</b></a> <span class="muted">{{ r.name }}</span>
+          <span class="track thin"><i style="width:{{ (r.last7 / mx * 100)|round }}%"></i></span></td>
+        <td class="r">{{ r.last7 }}</td>
+        <td class="r {{ 'up' if r.growth > 0.1 else ('down' if r.growth < -0.1 else 'muted') }}">{{ '%+.0f'|format((2.718281828 ** r.growth - 1) * 100) }}%</td>
+        <td class="r small"><a href="/daily?cat={{ r.category }}">daily</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
 {% endfor %}
+</div>
 {% endblock %}

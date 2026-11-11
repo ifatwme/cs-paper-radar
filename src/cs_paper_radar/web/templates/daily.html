@@ -1,29 +1,45 @@
 {% extends "base.html" %}
-{% from "_macros.html" import paper_card, legend %}
+{% from "_macros.html" import paper_card, legend, area_tabs %}
 {% block title %}Daily · {{ day }} · {{ site_name }}{% endblock %}
 {% block content %}
-<div class="row between">
-  <h1>Papers of {{ day }} <span class="muted small">{{ papers|length }} papers{% if cat %} in {{ cat }}{% endif %}</span></h1>
-  <div class="pager"><a href="/daily?date={{ prev_day }}&cat={{ cat }}&sort={{ sort }}">← {{ prev_day }}</a> <a href="/daily?date={{ next_day }}&cat={{ cat }}&sort={{ sort }}">{{ next_day }} →</a></div>
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Daily listing</p>
+    <h1>{{ day }}{% if cat %} · {{ cat }}{% endif %}</h1>
+    <p class="muted">{{ total_day }} papers first submitted this day (UTC){% if cat %} in {{ cat }} — {{ category_name(cat) }}{% endif %}. arXiv announces a day's submissions the next evening, so the newest day fills up over ~24 h.</p>
+  </div>
+  <div class="date-nav">
+    <a class="btn ghost sm" href="/daily?date={{ prev_day }}&cat={{ cat }}&sort={{ sort }}" aria-label="Previous day">←</a>
+    <form method="get" action="/daily"><input type="date" name="date" value="{{ day }}" min="{{ first_date }}" max="{{ last_date }}" data-autosubmit aria-label="Pick a date"><input type="hidden" name="cat" value="{{ cat }}"><input type="hidden" name="sort" value="{{ sort }}"></form>
+    <a class="btn ghost sm" href="/daily?date={{ next_day }}&cat={{ cat }}&sort={{ sort }}" aria-label="Next day">→</a>
+  </div>
 </div>
-<p class="muted small">Grouped by the date of first submission (UTC). arXiv announces a day's submissions the following evening, so the most recent day fills up over ~24 h.</p>
-<form class="filters" method="get" action="/daily">
-  <label>Date <select name="date" onchange="this.form.submit()">{% for d in dates %}<option {{ 'selected' if d == day }}>{{ d }}</option>{% endfor %}{% if day not in dates %}<option selected>{{ day }}</option>{% endif %}</select></label>
-  <label>Category <select name="cat" onchange="this.form.submit()"><option value="">all</option>{% for c, name in all_categories.items() %}<option value="{{ c }}" {{ 'selected' if c == cat }}>{{ c }} — {{ name }}</option>{% endfor %}</select></label>
-  <label>Order <select name="sort" onchange="this.form.submit()">{% for s, l in [('category','by category'),('score','by score'),('time','newest first')] %}<option value="{{ s }}" {{ 'selected' if s == sort }}>{{ l }}</option>{% endfor %}</select></label>
-  <noscript><button>Apply</button></noscript>
-</form>
-{% if not cat and counts %}
-<div class="chips small">{% for c, n in counts %}<a class="chip" href="#{{ c }}" title="{{ category_name(c) }}">{{ c }} <b>{{ n }}</b></a>{% endfor %}</div>
-{% endif %}
+
+{{ area_tabs(areas, '/daily?date=' ~ day ~ '&cat=' ~ cat ~ '&sort=' ~ sort, area, total_day) }}
+
+<div class="toolbar sticky">
+  <input type="search" class="filter-input" placeholder="Filter by title, author or category…" data-filter=".paper" aria-label="Filter papers">
+  <form method="get" action="/daily" class="inline">
+    <input type="hidden" name="date" value="{{ day }}"><input type="hidden" name="area" value="{{ area }}"><input type="hidden" name="sort" value="{{ sort }}">
+    <select name="cat" data-autosubmit aria-label="Category"><option value="">All categories</option>{% for c, name in all_categories.items() %}<option value="{{ c }}" {{ 'selected' if c == cat }}>{{ c }} — {{ name }}</option>{% endfor %}</select>
+  </form>
+  <div class="seg" role="group" aria-label="Order">
+    {% for s, l in [('area','By area'),('score','By score'),('time','Newest')] %}<a href="/daily?date={{ day }}&cat={{ cat }}&area={{ area }}&sort={{ s }}" class="{{ 'on' if s == sort }}">{{ l }}</a>{% endfor %}
+  </div>
+  <button type="button" class="btn ghost sm" data-toggle-abstracts>Expand abstracts</button>
+  <span class="muted small filter-count" aria-live="polite"></span>
+</div>
 {{ legend() }}
-{% if sort == 'category' %}
-  {% for c, items in groups.items() %}
-  <h2 id="{{ c }}" class="group">{{ c }} <span class="muted">{{ category_name(c) }} · {{ items|length }}</span></h2>
-  {% for p in items %}{{ paper_card(p) }}{% endfor %}
+
+{% if sort == 'area' %}
+  {% for slug, name, items in groups %}
+  <section class="group" id="{{ slug }}">
+    <h2><span class="area-dot a-{{ slug }}"></span>{{ name }} <span class="muted">{{ items|length }}</span></h2>
+    <div class="list dense">{% for p in items %}{{ paper_card(p) }}{% endfor %}</div>
+  </section>
   {% endfor %}
 {% else %}
-  {% for p in papers %}{{ paper_card(p, rank=loop.index if sort == 'score' else none) }}{% endfor %}
+  <div class="list dense">{% for p in papers %}{{ paper_card(p, rank=loop.index if sort == 'score' else none) }}{% endfor %}</div>
 {% endif %}
-{% if not papers %}<p class="muted">No papers for this day{% if cat %} in {{ cat }}{% endif %}. Weekends are quiet, and the newest day appears after arXiv's evening announcement.</p>{% endif %}
+{% if not papers %}<div class="empty">No papers for this day{% if cat %} in {{ cat }}{% endif %}. Weekends are quiet, and the newest day appears after arXiv's evening announcement.</div>{% endif %}
 {% endblock %}

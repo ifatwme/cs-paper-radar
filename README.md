@@ -45,7 +45,7 @@ Requirements: Docker with Compose v2.
 cp .env.example .env            # local use: delete the COMPOSE_FILE and TLS_DIR lines
 mkdir -p data && sudo chown 10001:10001 data
 docker compose build
-docker compose run --rm job backfill --days 90   # first load; ~1 h on 4 vCPUs (embedding is the slow part)
+docker compose run --rm job backfill --days 90   # first load: ~10 min fetching + ~45 min embedding on 4 vCPUs
 docker compose up -d                              # http://127.0.0.1:8000
 docker compose run --rm job update                # what the daily timer runs
 ```
@@ -60,8 +60,13 @@ Without Docker: `pip install -r requirements.txt -e . && DATA_DIR=./data cs-pape
 - `deploy/systemd/cs-paper-radar.service` keeps the stack up; `cs-paper-radar-update.timer` runs
   `update` at 02:30 and 14:30 UTC (after arXiv's announcement at 20:00 US Eastern). Install both with
   `make install-systemd`.
-- Each update re-fetches the last 4 days (late announcements, new versions, acceptance notes) and
-  re-scores the current and previous week.
+- Each update re-fetches the last 8 days (late announcements, new versions, acceptance notes and
+  code links added during the week) and re-scores the current and previous week. A full run takes
+  ~1-2 minutes: one arXiv request per day (page size 1000), embeddings only for new/changed papers.
+- **Self-healing**: every fetched day is logged with the count arXiv reported. Days in the last 60 that
+  are missing or were stored incompletely (outage, failed page) are re-fetched automatically on the
+  next run, then their weeks are re-scored.
+- Only one pipeline run at a time (file lock), so a manual backfill and the timer cannot collide.
 
 Containers run as a non-root user with a read-only root filesystem, all capabilities dropped,
 `no-new-privileges`, memory/CPU/PID limits and rotated logs.
@@ -75,10 +80,13 @@ All settings are environment variables (see `.env.example`):
 | `ARXIV_CATEGORIES` | `cs.*,eess.SY,eess.SP,eess.AS,eess.IV` | arXiv scope |
 | `TOP_N` | `20` | size of the weekly list (the page also accepts `?n=`) |
 | `TOP_MAX_PER_CATEGORY` | `4` | diversity cap in the weekly list |
+| `TOP_CS_PRIMARY_ONLY` | `true` | weekly picks only from papers whose primary category is CS/EESS |
 | `SCORE_WEIGHTS` | – | per-signal weight overrides |
 | `EMBEDDINGS` | `fastembed` | `fastembed` (local ONNX model), `hash` (no model, for tests), `off` (keywords only) |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | any fastembed text model |
-| `UPDATE_LOOKBACK_DAYS` | `4` | days re-fetched by each update |
+| `UPDATE_LOOKBACK_DAYS` | `8` | days re-fetched by each update |
+| `HEAL_WINDOW_DAYS` / `HEAL_MAX_DAYS` | `60` / `10` | how far back incomplete days are repaired, and how many per run |
+| `ARXIV_PAGE_SIZE` / `ARXIV_DELAY_S` | `1000` / `3.5` | request size and politeness delay (arXiv asks for ≥ 3 s) |
 | `NOVELTY_LOOKBACK_DAYS` / `MOMENTUM_BASELINE_WEEKS` | `90` / `4` | corpus-signal windows |
 
 ## API

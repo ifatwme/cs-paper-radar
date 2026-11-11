@@ -97,6 +97,7 @@ class ArxivSource:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._last_request = 0.0
+        self.last_total: int | None = None  # arXiv's count for the last fetched day
 
     def category_query(self) -> str:
         cats = " OR ".join(f"cat:{c}" for c in self.settings.arxiv_categories)
@@ -146,6 +147,7 @@ class ArxivSource:
         query = f"{self.category_query()} AND submittedDate:[{stamp}0000 TO {stamp}2359]"
         size = self.settings.arxiv_page_size
         total, papers = self._page(query, 0, size, expect_entries=False)
+        self.last_total = total
         log.info("arXiv %s: %d papers", day, total)
         seen = 0
         start = 0

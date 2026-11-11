@@ -1,39 +1,75 @@
-{% macro score_bar(p) -%}
+{% macro score_badge(p) -%}
 {% if p.total is not none %}
-<span class="score" title="Frontier score {{ '%.2f'|format(p.total) }} — {% for s in signals %}{{ signal_labels[s] }} {{ '%.2f'|format(p[s] or 0) }}{{ ', ' if not loop.last }}{% endfor %}">
-  <b>{{ '%.2f'|format(p.total) }}</b>
-  <span class="bar">{% for s in signals %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * (p[s] or 0) * 100)|round(1) }}%"></i>{% endfor %}</span>
-</span>
+<div class="score" tabindex="0" aria-label="Frontier score {{ '%.2f'|format(p.total) }}">
+  <span class="score-num">{{ '%.2f'|format(p.total) }}</span>
+  <span class="sbar">{% for s in signals %}<i class="sig-{{ s }}" style="width:{{ (weights[s] * (p[s] or 0) * 100)|round(1) }}%"></i>{% endfor %}</span>
+  <div class="pop" role="tooltip">
+    <div class="pop-title">Frontier score {{ '%.2f'|format(p.total) }}</div>
+    {% for s in signals %}
+    <div class="pop-row"><i class="dot sig-{{ s }}"></i><span>{{ signal_labels[s] }}</span><span class="pop-bar"><b class="sig-{{ s }}" style="width:{{ ((p[s] or 0) * 100)|round }}%"></b></span><span class="num">{{ '%.2f'|format(p[s] or 0) }}</span></div>
+    {% endfor %}
+    <div class="pop-foot">Hover numbers are signal values (0–1); the bar shows weighted contributions.</div>
+  </div>
+</div>
 {% endif %}
 {%- endmacro %}
 
-{% macro authors(list, n=6) -%}
-{{ list[:n]|join(', ') }}{% if list|length > n %} <span class="muted">+{{ list|length - n }}</span>{% endif %}
+{% macro authors(list, n=5) -%}
+{{ list[:n]|join(', ') }}{% if list|length > n %} <span class="muted">+{{ list|length - n }} more</span>{% endif %}
 {%- endmacro %}
 
-{% macro paper_card(p, rank=none, extra=none, open=false) -%}
-<article class="paper">
-  <div class="head">
-    {% if rank %}<span class="rank">{{ rank }}</span>{% endif %}
-    <div class="main">
-      <h3><a href="/paper/{{ p.uid }}">{{ p.title }}</a></h3>
-      <div class="meta">
-        <a class="cat" href="/daily?date={{ p.pub_date }}&cat={{ p.primary_category }}" title="{{ category_name(p.primary_category) }}">{{ p.primary_category }}</a>
-        {% for c in p.categories if c != p.primary_category %}<span class="cat x" title="{{ category_name(c) }}">{{ c }}</span>{% endfor %}
-        <span class="muted">· {{ p.pub_date }} ·</span> <span class="authors">{{ authors(p.authors) }}</span>
-      </div>
-      {% if p.tags %}<div class="tags">{% for t in p.tags %}<span class="tag t-{{ t|replace(' ', '-')|replace('/', '-') }}">{{ t }}</span>{% endfor %}</div>{% endif %}
-      {% if extra %}<div class="extra">{{ extra }}</div>{% endif %}
+{% macro cat_chip(c, home=false) -%}
+<a class="cat{{ '' if home else ' x' }}" href="/daily?cat={{ c }}" title="{{ category_name(c) }}">{{ c }}</a>
+{%- endmacro %}
+
+{% macro paper_card(p, rank=none, extra=none, open=false, compact=false) -%}
+<article class="paper{{ ' compact' if compact }}" data-text="{{ (p.title ~ ' ' ~ p.authors|join(' ') ~ ' ' ~ p.categories|join(' '))|lower }}">
+  {% if rank %}<div class="rank{{ ' top3' if rank <= 3 }}">{{ rank }}</div>{% endif %}
+  <div class="main">
+    <h3><a href="/paper/{{ p.uid }}">{{ p.title }}</a></h3>
+    <div class="meta">
+      {% if p.area_slug %}<span class="area-dot a-{{ p.area_slug }}" title="{{ p.area }}"></span>{% endif %}
+      {{ cat_chip(p.home or p.primary_category, true) }}
+      {% set others = p.categories|reject('equalto', p.home or p.primary_category)|list %}
+      {% for c in others[:3] %}{{ cat_chip(c) }}{% endfor %}{% if others|length > 3 %}<span class="muted small">+{{ others|length - 3 }}</span>{% endif %}
+      <span class="sep">·</span><span class="muted">{{ p.pub_date }}</span>
+      <span class="sep">·</span><span class="authors">{{ authors(p.authors) }}</span>
     </div>
-    <div class="side">
-      {{ score_bar(p) }}
-      <span class="links"><a href="{{ p.abs_url }}" target="_blank" rel="noopener">abs</a> <a href="{{ p.pdf_url }}" target="_blank" rel="noopener">pdf</a></span>
+    {% if p.tags or extra %}
+    <div class="tags">
+      {% for t in p.tags or [] %}<span class="tag t-{{ t|replace(' ', '-')|replace('/', '-') }}">{{ t }}</span>{% endfor %}
+      {% if extra %}<span class="extra">{{ extra }}</span>{% endif %}
     </div>
+    {% endif %}
+    {% if not compact %}
+    <details class="abs"{{ ' open' if open }}>
+      <summary><span class="lnk">Abstract</span>{% if p.comment %}<span class="muted comment"> · {{ p.comment[:140] }}{{ '…' if p.comment|length > 140 }}</span>{% endif %}</summary>
+      <p>{{ p.abstract }}</p>
+    </details>
+    {% endif %}
   </div>
-  <details{{ ' open' if open }}><summary>Abstract{% if p.comment %} · <span class="muted">{{ p.comment[:120] }}</span>{% endif %}</summary><p>{{ p.abstract }}</p></details>
+  <div class="side">
+    {{ score_badge(p) }}
+    <div class="links"><a href="{{ p.abs_url }}" target="_blank" rel="noopener" title="arXiv abstract page">arXiv</a><a href="{{ p.pdf_url }}" target="_blank" rel="noopener" title="PDF">PDF</a></div>
+  </div>
 </article>
 {%- endmacro %}
 
 {% macro legend() -%}
-<div class="legend">{% for s in signals %}<span><i class="sig-{{ s }}"></i>{{ signal_labels[s] }} {{ (weights[s] * 100)|round|int }}%</span>{% endfor %} <a href="/about">how scoring works</a></div>
+<div class="legend"><span class="muted">Score</span>{% for s in signals %}<span><i class="sig-{{ s }}"></i>{{ signal_labels[s] }} {{ (weights[s] * 100)|round|int }}%</span>{% endfor %}<a href="/about">how it works</a></div>
+{%- endmacro %}
+
+{% macro area_tabs(areas, base, current, total) -%}
+<nav class="tabs" aria-label="Research areas">
+  <a href="{{ base }}" class="{{ 'on' if not current }}">All <b>{{ total }}</b></a>
+  {% for a in areas if a.n %}<a href="{{ base }}{{ '&' if '?' in base else '?' }}area={{ a.slug }}" class="{{ 'on' if current == a.slug }}"><span class="area-dot a-{{ a.slug }}"></span>{{ a.name }} <b>{{ a.n }}</b></a>{% endfor %}
+</nav>
+{%- endmacro %}
+
+{% macro preset_chips(compact=false) -%}
+<div class="presets{{ ' compact' if compact }}">
+{% for group, topics in preset_groups.items() %}
+  <div class="preset-group"><span class="preset-label">{{ group }}</span>{% for t in topics %}<a class="chip" href="/topic?q={{ quote(t) }}">{{ t }}</a>{% endfor %}</div>
+{% endfor %}
+</div>
 {%- endmacro %}

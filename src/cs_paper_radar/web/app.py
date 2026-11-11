@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 from datetime import date, datetime, timedelta, timezone
@@ -18,8 +19,16 @@ from .. import __version__
 from ..config import Settings, get_settings
 from ..db import SIGNALS, Database, iso_week, week_bounds
 from ..scoring import select_top
-from ..taxonomy import AREAS, CATEGORY_NAMES, area_of, category_name
-from ..topics import PRESET_TOPICS, TopicEngine, VectorIndex
+from ..taxonomy import (
+    AREA_SLUGS,
+    AREAS,
+    CATEGORY_NAMES,
+    SLUG_OF_AREA,
+    area_of,
+    category_name,
+    home_category,
+)
+from ..topics import PRESET_GROUPS, PRESET_TOPICS, TopicEngine, VectorIndex
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
@@ -71,7 +80,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     env = templates.env
+    # Content hash for cache-busting static assets (nginx caches /static for days).
+    asset_version = hashlib.sha1(
+        b"".join((HERE / "static" / f).read_bytes() for f in ("style.css", "app.js"))
+    ).hexdigest()[:10]
     env.globals.update(
+        asset_version=asset_version,
+        top_n=settings.top_n,
         site_name=settings.site_name,
         version=__version__,
         signals=SIGNALS,
@@ -79,6 +94,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         weights=settings.weights,
         category_name=category_name,
         presets=PRESET_TOPICS,
+        preset_groups=PRESET_GROUPS,
+        area_slugs=AREA_SLUGS,
         quote=quote,
     )
     env.filters["sparkline"] = sparkline
@@ -95,16 +112,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def latest_week() -> str:
         return iso_week(date.fromisoformat(latest_date()))
 
-    def weekly_top(week: str, n: int, category: str | None = None) -> list[dict]:
-        if not category:
+    def decorate(papers: list[dict]) -> list[dict]:
+        """Attach the paper's CS/CE home category and research area."""
+        for p in papers:
+            home = home_category(p["primary_category"], p["categories"])
+            p["home"] = home
+            p["area"] = area_of(home)
+            p["area_slug"] = SLUG_OF_AREA.get(p["area"], "other")
+        return papers
+
+    def area_counts(papers: list[dict]) -> list[dict]:
+        counts: dict[str, int] = {}
+        for p in papers:
+            counts[p["area_slug"]] = counts.get(p["area_slug"], 0) + 1
+        return [{"slug": s, "name": n, "n": counts.get(s, 0)} for s, n in AREA_SLUGS.items()]
+
+    def weekly_top(week: str, n: int, category: str | None = None, area: str | None = None) -> list[dict]:
+        if not category and not area:
             picks = db.weekly_picks(week)
             if len(picks) >= n:
-                return picks[:n]
+                return decorate(picks[:n])
         start, end = week_bounds(week)
-        papers = db.papers_between(start.isoformat(), end.isoformat(), category, scored_only=True)
+        papers = decorate(db.papers_between(start.isoformat(), end.isoformat(), category, scored_only=True))
+        if area:
+            papers = [p for p in papers if p["area_slug"] == area]
+        if settings.top_cs_primary_only:
+            papers = [p for p in papers if p["primary_category"] in CATEGORY_NAMES]
         vectors = {p["uid"]: v for p in papers[: n * 5] if (v := index.vector(p["uid"])) is not None}
-        primary = {p["uid"]: p["primary_category"] for p in papers}
-        return select_top(papers, primary, n=n,
+        home = {p["uid"]: p["home"] for p in papers}
+        return select_top(papers, home, n=n,
                           max_per_category=0 if category else settings.top_max_per_category,
                           vectors=vectors)
 
@@ -118,60 +154,73 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         last = latest_date()
         week = latest_week()
         top = weekly_top(week, settings.top_n)
-        start = (date.fromisoformat(last) - timedelta(days=27)).isoformat()
+        start = (date.fromisoformat(last) - timedelta(days=41)).isoformat()
         daily = db.daily_counts(start, last)
         wk_start, wk_end = week_bounds(week)
-        cats = db.category_counts(wk_start.isoformat(), wk_end.isoformat(), primary_only=True)
         week_days = len(db.daily_counts(wk_start.isoformat(), wk_end.isoformat()))
+        week_papers = decorate(db.papers_between(wk_start.isoformat(), wk_end.isoformat()))
+        movers = sorted((r for r in category_table() if r["last7"] >= 20),
+                        key=lambda r: r["growth"], reverse=True)
         return render(
             request, "home.html", latest=last, week=week, top=top, daily=daily,
-            week_total=sum(cats.values()), prev_week=_shift_week(week, -1), week_days=week_days,
+            week_total=len(week_papers), prev_week=_shift_week(week, -1), week_days=week_days,
             today_count=next((d["n"] for d in daily if d["pub_date"] == last), 0),
-            top_cats=sorted(cats.items(), key=lambda kv: kv[1], reverse=True)[:8],
+            areas=area_counts(week_papers), risers=movers[:5],
         )
 
     @app.get("/daily", response_class=HTMLResponse, include_in_schema=False)
     def daily(request: Request, date_: str | None = Query(None, alias="date"),
-              cat: str | None = None, sort: str = "category"):
+              cat: str | None = None, area: str | None = None, sort: str = "area"):
         day = date_ or latest_date()
-        if sort not in ("category", "score", "time"):
-            sort = "category"
-        papers = db.papers_on(day, cat or None, sort)
-        groups: dict[str, list[dict]] = {}
-        if sort == "category":
+        try:
+            d = date.fromisoformat(day)
+        except ValueError:
+            raise HTTPException(400, "date must look like 2026-11-10") from None
+        if sort not in ("area", "score", "time"):
+            sort = "area"
+        all_day = decorate(db.papers_on(day, cat or None, "time" if sort == "time" else "score"))
+        papers = [p for p in all_day if not area or p["area_slug"] == area]
+        groups: list[tuple[str, str, list[dict]]] = []
+        if sort == "area":
+            by_area: dict[str, list[dict]] = {}
             for p in papers:
-                groups.setdefault(p["primary_category"], []).append(p)
-        d = date.fromisoformat(day)
-        counts = db.category_counts(day, day, primary_only=True)
+                by_area.setdefault(p["area_slug"], []).append(p)
+            groups = [(s, AREA_SLUGS.get(s, "Other"), by_area[s])
+                      for s in [*AREA_SLUGS, "other"] if s in by_area]
+        first, last = db.date_range()
         return render(
-            request, "daily.html", day=day, cat=cat or "", sort=sort, papers=papers, groups=groups,
+            request, "daily.html", day=day, cat=cat or "", area=area or "", sort=sort,
+            papers=papers, groups=groups, areas=area_counts(all_day), total_day=len(all_day),
             prev_day=(d - timedelta(days=1)).isoformat(), next_day=(d + timedelta(days=1)).isoformat(),
-            dates=db.available_dates(30), counts=sorted(counts.items()),
-            all_categories=CATEGORY_NAMES,
+            first_date=first, last_date=last, all_categories=CATEGORY_NAMES,
         )
 
     @app.get("/weekly", response_class=HTMLResponse, include_in_schema=False)
     def weekly(request: Request, week: str | None = None, n: int = Query(0, ge=0, le=200),
-               cat: str | None = None):
+               cat: str | None = None, area: str | None = None):
         week = week or latest_week()
         n = n or settings.top_n
         try:
             start, end = week_bounds(week)
         except ValueError:
             raise HTTPException(400, "week must look like 2026-W46") from None
-        papers = weekly_top(week, n, cat or None)
+        papers = weekly_top(week, n, cat or None, area or None)
         total = sum(db.category_counts(start.isoformat(), end.isoformat(), primary_only=True).values())
         days_with_data = len(db.daily_counts(start.isoformat(), end.isoformat()))
         return render(
-            request, "weekly.html", week=week, n=n, cat=cat or "", papers=papers, total=total,
-            days_with_data=days_with_data, prev_week=_shift_week(week, -1),
-            next_week=_shift_week(week, 1), weeks=db.available_weeks(26),
+            request, "weekly.html", week=week, n=n, cat=cat or "", area=area or "", papers=papers,
+            total=total, days_with_data=days_with_data, prev_week=_shift_week(week, -1),
+            next_week=_shift_week(week, 1), weeks=db.available_weeks(26), latest_week=latest_week(),
             all_categories=CATEGORY_NAMES, max_per_cat=settings.top_max_per_category,
         )
 
     @app.get("/topic", response_class=HTMLResponse, include_in_schema=False)
     def topic(request: Request, q: str = "", days: int = Query(30, ge=7, le=180)):
         report = engine.report(q.strip(), days=days) if q.strip() else None
+        if report:
+            decorate([h["paper"] for h in report["new"] + report["frontier"]])
+            for c in report["subtopics"]:
+                decorate(c["papers"])
         return render(request, "topic.html", q=q.strip(), days=days, report=report)
 
     @app.get("/paper/{uid:path}", response_class=HTMLResponse, include_in_schema=False)
@@ -179,10 +228,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         p = db.get_paper(uid)
         if not p:
             raise HTTPException(404, "paper not found")
+        decorate([p])
         sims = index.similar(uid, 8)
         similar = db.get_papers([u for u, _ in sims])
-        similar_list = [{**similar[u], "similarity": s} for u, s in sims if u in similar]
-        return render(request, "paper.html", p=p, similar=similar_list)
+        similar_list = decorate([{**similar[u], "similarity": s} for u, s in sims if u in similar])
+        return render(request, "paper.html", p=p, similar=similar_list,
+                      related_terms=related_terms(p))
+
+    def related_terms(p: dict, k: int = 10) -> list[str]:
+        """Topic links for a paper: phrases from its title first (longest first),
+        then acronyms, then the remaining phrases; no phrase contained in another."""
+        title = p["title"].lower()
+        kp = p.get("keyphrases") or []
+        ranked = sorted(kp, key=lambda t: (t.lower() not in title, " " not in t, -len(t)))
+        out: list[str] = []
+        for t in ranked:
+            if any(t.lower() in o.lower() or o.lower() in t.lower() for o in out):
+                continue
+            out.append(t)
+            if len(out) == k:
+                break
+        return out
 
     @app.get("/categories", response_class=HTMLResponse, include_in_schema=False)
     def categories(request: Request):
