@@ -50,9 +50,12 @@ S2_FIELDS = "citationCount,influentialCitationCount,venue,publicationVenue,journ
 
 def enrich_semantic_scholar(settings: Settings, db: Database, today: date) -> dict:
     headers = {"x-api-key": settings.s2_api_key} if settings.s2_api_key else {}
-    client = PoliteClient(min_interval=1.1, budget_s=settings.enrich_budget_s, headers=headers)
+    # The keyless shared pool throttles hard: pace batches and ride out 429 storms.
+    client = PoliteClient(min_interval=1.1 if settings.s2_api_key else 3.0,
+                          budget_s=settings.enrich_budget_s, headers=headers, retries=4)
     max_batches = settings.s2_max_batches_keyed if settings.s2_api_key else settings.s2_max_batches
     stats = {"requested": 0, "found": 0, "batches": 0, "errors": 0}
+    failures = 0
     for _ in range(max_batches):
         due = db.s2_due(today, limit=500)
         if not due:
@@ -63,13 +66,22 @@ def enrich_semantic_scholar(settings: Settings, db: Database, today: date) -> di
                 {"ids": [f"arXiv:{nid}" for _, nid in due]},
                 params={"fields": S2_FIELDS},
             )
+            failures = 0
         except BudgetExceeded:
             log.warning("Semantic Scholar: time budget exhausted")
             break
         except Exception as exc:  # keep the run alive
-            log.error("Semantic Scholar batch failed: %s", exc)
             stats["errors"] += 1
-            break
+            failures += 1
+            log.warning("Semantic Scholar batch failed (%d in a row): %s", failures, str(exc)[:120])
+            if failures >= 4:
+                break
+            try:
+                client._wait("pause")  # respects the time budget
+            except BudgetExceeded:
+                break
+            time.sleep(120)
+            continue
         rows = []
         for (uid, _), item in zip(due, res or []):
             if not item:
