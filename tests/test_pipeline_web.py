@@ -58,7 +58,7 @@ def test_web_pages_and_api(populated):
 
     client = TestClient(create_app(populated))
     for path in ["/", "/daily", "/weekly", "/topic", "/topic?q=network+security", "/categories",
-                 "/about", "/feed/weekly.xml", "/healthz", "/api/docs"]:
+                 "/about", "/feed/weekly.xml", "/healthz", "/api/docs", "/api/fairness"]:
         r = client.get(path)
         assert r.status_code == 200, path
 
@@ -70,6 +70,8 @@ def test_web_pages_and_api(populated):
     assert detail["score"]["total"] == week["papers"][0]["score"]["total"]
     assert set(detail["score"]["signals"]) >= {"citations", "venue", "novelty"}
     assert "github_stars" in detail["metrics"]
+    fair = client.get("/api/fairness", params={"week": iso_week(START + timedelta(days=DAYS - 8))}).json()
+    assert fair["areas"] and abs(sum(a["paper_share"] for a in fair["areas"]) - 1) < 0.01
     assert len(detail["similar"]) > 0
 
     daily = client.get("/api/daily", params={"date": START.isoformat(), "cat": "cs.CR"}).json()

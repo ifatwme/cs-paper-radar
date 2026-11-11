@@ -27,18 +27,24 @@ TIER_VALUE = {"A*": 1.0, "A": 0.85, "B": 0.65, "C": 0.45}
 JOURNAL_PATTERNS = [
     (re.compile(r"\b(IEEE|ACM) Transactions\b|\bTransactions on\b", re.I), 0.85, "transactions journal"),
     (re.compile(r"\bJournal of Machine Learning Research\b|\bJMLR\b|\bTMLR\b|Transactions on Machine Learning Research", re.I), 0.85, "ML journal"),
-    (re.compile(r"\bNature\b|\bScience\b|\bPNAS\b|Proceedings of the National Academy", re.I), 1.0, "multidisciplinary journal"),
+    (re.compile(r"^(Nature|Science)$|\bNature (Communications|Machine Intelligence|Electronics|Methods)\b|"
+                r"\bScience (Advances|Robotics)\b|\bPNAS\b|Proceedings of the National Academy"), 1.0,
+     "multidisciplinary journal"),
     (re.compile(r"\bCommunications of the ACM\b|\bACM Computing Surveys\b|\bProceedings of the IEEE\b", re.I), 0.85, "flagship journal"),
     (re.compile(r"\bJournal\b|\bLetters\b|\bMagazine\b|\bReview\b", re.I), 0.55, "journal"),
 ]
 _NORM = re.compile(r"[^a-z0-9 ]+")
 _YEAR = re.compile(r"\b(19|20)\d{2}\b|\b\d+(st|nd|rd|th)\b", re.I)
 _FILLER = re.compile(r"\b(proceedings|of|the|annual|international|conference|on|in|ieee|acm|cvf|"
-                     r"symposium|workshops?|and|for)\b")
+                     r"symposium|workshops?|and|for|advances|meeting|isoc|usenix|joint)\b")
+
+
+_PAREN = re.compile(r"\([^)]*\)")
 
 
 def _norm(text: str) -> str:
-    return " ".join(_FILLER.sub(" ", _NORM.sub(" ", _YEAR.sub(" ", text.lower()))).split())
+    text = _PAREN.sub(" ", text.lower())  # "(was NIPS)"
+    return " ".join(_FILLER.sub(" ", _NORM.sub(" ", _YEAR.sub(" ", text))).split())
 
 
 class VenueRanker:
@@ -59,17 +65,28 @@ class VenueRanker:
         """Return (tier, value, how) for a venue name or acronym; (None, None, '') if unknown."""
         if not venue:
             return None, None, ""
-        v = venue.strip()
-        # 1. acronyms inside the string ("NeurIPS 2026", "Proc. of CCS '26")
-        for tok in re.findall(r"[A-Za-z][A-Za-z&\-]{1,15}", v):
-            rank = self.by_acronym.get(tok.upper())
-            if rank and sum(c.isupper() for c in tok) >= 2:
-                return rank, TIER_VALUE[rank], f"CORE {rank} ({tok})"
-        # 2. full title
+        return self._tier(venue.strip())
+
+    @lru_cache(maxsize=20000)  # noqa: B019 - rankers are few and long-lived
+    def _tier(self, v: str) -> tuple[str | None, float | None, str]:
         n = _norm(v)
+        # 1. full title, exact
         if n in self.by_title:
             rank = self.by_title[n]
             return rank, TIER_VALUE[rank], f"CORE {rank}"
+        # 2. a CORE title contained in the venue string ("Annual Meeting of the ACL" ...)
+        best = max((t for t in self.by_title if len(t) >= 12 and f" {t} " in f" {n} "),
+                   key=len, default=None)
+        if best:
+            rank = self.by_title[best]
+            return rank, TIER_VALUE[rank], f"CORE {rank}"
+        # 3. acronyms ("NeurIPS 2026", "Proc. of CCS '26"); case-insensitive only for
+        #    short strings ("Interspeech"), to avoid matching ordinary words.
+        short = len(v.split()) <= 3
+        for tok in re.findall(r"[A-Za-z][A-Za-z&\-]{1,15}", v):
+            rank = self.by_acronym.get(tok.upper())
+            if rank and (sum(c.isupper() for c in tok) >= 2 or (short and len(tok) >= 5)):
+                return rank, TIER_VALUE[rank], f"CORE {rank} ({tok})"
         for pattern, value, label in JOURNAL_PATTERNS:
             if pattern.search(v):
                 return None, value, label

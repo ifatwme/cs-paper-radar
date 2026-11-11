@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from .. import __version__
 from ..config import Settings, get_settings
 from ..db import SIGNALS, Database, iso_week, week_bounds
-from ..scoring import select_top
+from ..scoring import fairness_report, select_top
 from ..taxonomy import (
     AREA_SLUGS,
     AREAS,
@@ -279,7 +279,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/about", response_class=HTMLResponse, include_in_schema=False)
     def about(request: Request):
-        return render(request, "about.html", settings=settings)
+        return render(request, "about.html", settings=settings,
+                      fairness=fairness_report(db, _shift_week(latest_week(), -1)))
 
     @app.get("/feed/weekly.xml", include_in_schema=False)
     def feed(request: Request):
@@ -369,6 +370,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "paper not found")
         sims = index.similar(uid, 10)
         return {**slim(p), "similar": [{"uid": u, "similarity": round(s, 4)} for u, s in sims]}
+
+    @app.get("/api/fairness", tags=["meta"])
+    def api_fairness(week: str | None = None, top: int = Query(50, ge=10, le=200)):
+        """Per research area: share of papers vs. share of the weekly top picks, mean
+        measured coverage, and the share of papers for which each signal was measured."""
+        return fairness_report(db, week or _shift_week(latest_week(), -1), top)
 
     @app.get("/api/categories", tags=["meta"])
     def api_categories():

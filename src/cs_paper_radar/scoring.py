@@ -512,3 +512,38 @@ def select_top(
         if len(picked) >= n:
             break
     return picked
+
+
+def fairness_report(db: Database, week: str, top: int = 50) -> dict:
+    """How each research area fares in a week: its share of papers vs. its share of
+    the top picks, mean measured coverage, and which signals were measurable."""
+    from .db import SIGNALS
+
+    start, end = week_bounds(week)
+    papers = db.papers_between(start.isoformat(), end.isoformat(), scored_only=True)
+    picks = {p["uid"] for p in db.weekly_picks(week)[:top]}
+    areas: dict[str, dict] = {}
+    for p in papers:
+        slug = SLUG_OF_AREA.get(area_of(home_category(p["primary_category"], p["categories"])), "other")
+        a = areas.setdefault(slug, {"area": AREA_SLUGS.get(slug, "Other"), "papers": 0, "picks": 0,
+                                    "coverage": 0.0, "total": [],
+                                    "measured": {s: 0 for s in SIGNALS}})
+        a["papers"] += 1
+        a["picks"] += p["uid"] in picks
+        a["coverage"] += p.get("coverage") or 0
+        a["total"].append(p["total"])
+        for s in SIGNALS:
+            a["measured"][s] += p.get(s) is not None
+    n = len(papers) or 1
+    k = len(picks) or 1
+    rows = []
+    for slug, a in sorted(areas.items(), key=lambda kv: -kv[1]["papers"]):
+        m = a["papers"]
+        rows.append({
+            "slug": slug, "area": a["area"], "papers": m,
+            "paper_share": round(m / n, 3), "pick_share": round(a["picks"] / k, 3),
+            "picks": a["picks"], "mean_coverage": round(a["coverage"] / m, 3),
+            "median_total": round(float(np.median(a["total"])), 3),
+            "measured": {s: round(c / m, 3) for s, c in a["measured"].items()},
+        })
+    return {"week": week, "papers": len(papers), "top": len(picks), "areas": rows}

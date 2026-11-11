@@ -122,3 +122,16 @@ def test_home_category_for_cross_listed_papers():
     assert home_category("cs.CR", ["cs.CR", "cs.LG"]) == "cs.CR"
     assert home_category("math.OC", ["math.OC", "eess.SY", "cs.LG"]) == "eess.SY"
     assert area_of(home_category("stat.ML", ["stat.ML", "cs.LG"])) == "AI & Machine Learning"
+
+
+def test_venue_ranker_titles_and_false_friends():
+    r = VenueRanker([("Advances in Neural Information Processing Systems (was NIPS)", "NeurIPS", "A*"),
+                     ("International Conference on Neural Information Processing", "ICONIP", "B"),
+                     ("Usenix Network and Distributed System Security Symposium", "NDSS", "A*"),
+                     ("Association for Computational Linguistics", "ACL", "A*")])
+    assert r.tier("Neural Information Processing Systems")[0] == "A*"
+    assert r.tier("International Conference on Neural Information Processing")[0] == "B"
+    assert r.tier("Network and Distributed System Security Symposium")[0] == "A*"
+    assert r.tier("Annual Meeting of the Association for Computational Linguistics")[0] == "A*"
+    assert r.tier("SN Computer Science")[1] is None          # not "Science"
+    assert r.tier("Nature Machine Intelligence")[1] == 1.0

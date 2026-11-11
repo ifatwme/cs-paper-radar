@@ -30,6 +30,18 @@
 <li><b>No prestige shortcuts.</b> Author h-index, team size and number of cross-listed categories are shown for context but are not part of the score: they reward famous groups and are easy to game.</li>
 <li><b>Scores mature.</b> Evidence keeps arriving, so the last {{ settings.rescore_weeks }} weeks are re-scored on every update. Rankings of the current week are provisional; older weeks settle as citations accumulate.</li>
 </ul>
+{% if fairness and fairness.areas %}
+<h3>Fairness check — {{ fairness.week }}</h3>
+<p class="muted small">Share of the week's papers vs. share of its top {{ fairness.top }}, and how much of the score could be measured. Live data: <a href="/api/fairness">/api/fairness</a>.</p>
+<table class="breakdown">
+<thead><tr><th>Area</th><th class="r">Papers</th><th class="r">Share</th><th class="r">Share of top {{ fairness.top }}</th><th class="r">Measured weight</th><th>Signals measured (share of papers)</th></tr></thead>
+<tbody>
+{% for a in fairness.areas %}
+<tr><td><span class="area-dot a-{{ a.slug }}"></span> {{ a.area }}</td><td class="r">{{ a.papers }}</td><td class="r">{{ a.paper_share|pct }}</td><td class="r">{{ a.pick_share|pct }}</td><td class="r">{{ a.mean_coverage|pct }}</td>
+<td class="small muted">{% for s, v in a.measured.items() if v < 0.99 %}{{ signal_labels[s] }} {{ v|pct }}{{ ' · ' if not loop.last }}{% else %}all{% endfor %}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
 <p>The weekly top {{ settings.top_n }} takes at most {{ settings.top_max_per_category }} papers per category and skips near-duplicates. Weights are configurable (<code>SCORE_WEIGHTS</code>).</p>
 
 <h2>Topics</h2>
