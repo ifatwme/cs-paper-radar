@@ -63,9 +63,19 @@ docker compose run --rm job update                # what the daily timer runs
 Other jobs: `enrich` (external evidence + re-score), `stats`, `top --week 2026-W46`, `topic "network security"`, `rescore --start 2026-10-01`.
 Without Docker: `pip install -r requirements.txt -e . && DATA_DIR=./data cs-paper-radar backfill --days 30 && cs-paper-radar serve`.
 
-### Server deployment (what runs on the VPS)
+### Server deployment
 
-- `deploy/compose.server.yml` adds an `nginx-unprivileged` HTTPS proxy on `HTTPS_PORT` using an
+The server override binds the site to **127.0.0.1 only** by default. Browse it through an SSH tunnel:
+
+```bash
+ssh -N -L 9000:127.0.0.1:<HTTPS_PORT> -p <ssh-port> user@<server>   # then open https://localhost:9000
+```
+
+(The certificate is issued for the server's address, so the browser will warn on `localhost`; accept it
+for the tunnel, or set `HTTPS_BIND=0.0.0.0` only if you deliberately want the site public.)
+
+
+- `deploy/compose.server.yml` adds an `nginx-unprivileged` HTTPS proxy on `HTTPS_BIND:HTTPS_PORT` using an
   existing Let's Encrypt certificate (`TLS_DIR`) and hides the app port. Enabled by `COMPOSE_FILE` in `.env`.
 - `deploy/systemd/cs-paper-radar.service` keeps the stack up; `cs-paper-radar-update.timer` runs
   `update` at 02:30 and 14:30 UTC (after arXiv's announcement at 20:00 US Eastern). Install both with
